@@ -27,8 +27,38 @@ fi
 source .venv/bin/activate
 
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+
+# Install a PyTorch CUDA build that matches cluster drivers.
+# Prefer cu129 (for CUDA 12.9 module), fall back to cu128 if unavailable.
+TORCH_CUDA_INDEX=""
+for cuda_tag in cu129 cu128; do
+  candidate_index="https://download.pytorch.org/whl/${cuda_tag}"
+  echo "Trying PyTorch index: ${candidate_index}"
+  if python -m pip install --index-url "${candidate_index}" torch==2.8.0 torchaudio==2.8.0; then
+    TORCH_CUDA_INDEX="${candidate_index}"
+    echo "Using PyTorch CUDA index: ${TORCH_CUDA_INDEX}"
+    break
+  fi
+done
+
+if [ -z "${TORCH_CUDA_INDEX}" ]; then
+  echo "Failed to install CUDA-enabled torch wheels (tried cu129 and cu128)."
+  exit 1
+fi
+
+# Install remaining requirements (torch/torchaudio entries are already satisfied).
+python -m pip install -r requirements.txt --extra-index-url "${TORCH_CUDA_INDEX}"
 python -m pip install -e .
+
+python - <<'PY'
+import torch
+print("Torch version:", torch.__version__)
+print("Torch CUDA build:", torch.version.cuda)
+print("CUDA available:", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print("CUDA device count:", torch.cuda.device_count())
+    print("CUDA device 0:", torch.cuda.get_device_name(0))
+PY
 
 MUSDB_ROOT="/path/to/musdb18hq"
 STEM="vocals"
