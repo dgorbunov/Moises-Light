@@ -119,10 +119,25 @@ def _resolve_trainer_runtime(cfg: TrainConfig) -> dict[str, object]:
     # For local macOS validation, automatically choose a compatible setup.
     if accelerator == "gpu":
         if torch.cuda.is_available():
+            avail = torch.cuda.device_count()
+            use_devices = int(devices)
+            if use_devices > avail:
+                warnings.warn(
+                    f"Requested devices={use_devices}, but only {avail} CUDA device(s) are visible. "
+                    f"Using devices={avail}.",
+                    stacklevel=2,
+                )
+                use_devices = avail
+            if use_devices < 1:
+                use_devices = 1
+            use_strategy = strategy
+            if use_devices == 1 and str(use_strategy).startswith("ddp"):
+                warnings.warn("DDP requires >1 GPU; switching strategy to 'auto'.", stacklevel=2)
+                use_strategy = "auto"
             return {
                 "accelerator": accelerator,
-                "devices": devices,
-                "strategy": strategy,
+                "devices": use_devices,
+                "strategy": use_strategy,
                 "precision": precision,
             }
         if torch.backends.mps.is_available():
