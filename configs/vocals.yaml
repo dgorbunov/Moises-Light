@@ -1,4 +1,4 @@
-musdb_root: "/path/to/musdb18hq"
+musdb_root: "/home/dzzhang/Deep Learning"
 download_preview: false
 target_stem: "vocals"
 

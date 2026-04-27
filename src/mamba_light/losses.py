@@ -17,10 +17,11 @@ class MultiResParams:
 
 def _stft_complex_mae(wav: torch.Tensor, wav_ref: torch.Tensor, n_fft: int, hop: int, win: int) -> torch.Tensor:
     # wav: (B, C, T)
-    window = torch.hann_window(win, device=wav.device, dtype=wav.dtype)
+    # Use float32 for STFT (AMP-friendly; avoids cuFFT half constraints on some n_fft sizes).
+    window = torch.hann_window(win, device=wav.device, dtype=torch.float32)
     b, c, _ = wav.shape
     X = torch.stft(
-        wav.reshape(b * c, -1),
+        wav.float().reshape(b * c, -1),
         n_fft=n_fft,
         hop_length=hop,
         win_length=win,
@@ -29,7 +30,7 @@ def _stft_complex_mae(wav: torch.Tensor, wav_ref: torch.Tensor, n_fft: int, hop:
         return_complex=True,
     )
     Y = torch.stft(
-        wav_ref.reshape(b * c, -1),
+        wav_ref.float().reshape(b * c, -1),
         n_fft=n_fft,
         hop_length=hop,
         win_length=win,
