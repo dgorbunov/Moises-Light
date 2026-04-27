@@ -12,12 +12,15 @@ from mamba_light.audio_io import load_audio
 
 STEMS = ("vocals", "drums", "bass", "other")
 
+_STEMPEG_STEM_INDEX = {"drums": 1, "bass": 2, "other": 3, "vocals": 4}  # common MUSDB ordering w/ mixture at 0
+
 
 @dataclass(frozen=True)
 class TrackPaths:
     name: str
     mixture: Path
     stems: dict[str, Path]
+    is_stem_mp4: bool = False
 
 
 def _infer_layout(root: Path) -> tuple[Path, Path, Path | None]:
@@ -52,10 +55,10 @@ def discover_tracks(root: str | Path, split: str) -> list[TrackPaths]:
         raise FileNotFoundError(base)
 
     tracks: list[TrackPaths] = []
+    # Case A: directory-per-track layout with WAV/FLAC
     for track_dir in sorted([p for p in base.iterdir() if p.is_dir()]):
         mix = track_dir / "mixture.wav"
         if not mix.exists():
-            # alternative name used in some exports
             alt = track_dir / "mixture.flac"
             if alt.exists():
                 mix = alt
@@ -71,7 +74,16 @@ def discover_tracks(root: str | Path, split: str) -> list[TrackPaths]:
             if not cand.exists():
                 raise FileNotFoundError(f"Missing stem {s} for {track_dir}")
             stems[s] = cand
-        tracks.append(TrackPaths(name=track_dir.name, mixture=mix, stems=stems))
+        tracks.append(TrackPaths(name=track_dir.name, mixture=mix, stems=stems, is_stem_mp4=False))
+
+    # Case B: original MUSDB layout with *.stem.mp4 files
+    if not tracks:
+        mp4s = sorted([p for p in base.iterdir() if p.is_file() and p.name.endswith(".stem.mp4")])
+        for mp4 in mp4s:
+            stems = {s: mp4 for s in STEMS}
+            name = mp4.name.replace(".stem.mp4", "")
+            tracks.append(TrackPaths(name=name, mixture=mp4, stems=stems, is_stem_mp4=True))
+
     if not tracks:
         raise FileNotFoundError(f"No tracks found under {base}")
 
@@ -141,7 +153,7 @@ class MusdbSegmentDataset(Dataset):
         self._index: list[tuple[int, int]] = []
         self._track_num_samples: list[int] = []
         for ti, tp in enumerate(self.tracks):
-            mix = load_audio(tp.mixture, sample_rate=sample_rate)
+            mix = _load_mixture(tp, sample_rate=sample_rate)
             n = mix.shape[-1]
             self._track_num_samples.append(n)
             for start in iter_segment_starts(n, self.seg_samples, overlap=overlap):
@@ -153,17 +165,74 @@ class MusdbSegmentDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         track_idx, start = self._index[idx]
         tp = self.tracks[track_idx]
-        mix = load_audio(tp.mixture, sample_rate=self.sample_rate)
-        tgt = load_audio(tp.stems[self.target_stem], sample_rate=self.sample_rate)
+        mix = _load_mixture_segment(tp, sample_rate=self.sample_rate, start_sample=start, num_samples=self.seg_samples)
+        tgt = _load_target_segment(
+            tp,
+            stem=self.target_stem,
+            sample_rate=self.sample_rate,
+            start_sample=start,
+            num_samples=self.seg_samples,
+        )
 
-        end = start + self.seg_samples
-        mix_seg = mix[:, start:end]
-        tgt_seg = tgt[:, start:end]
+        # Ensure fixed length
+        if mix.shape[-1] < self.seg_samples:
+            mix = torch.nn.functional.pad(mix, (0, self.seg_samples - mix.shape[-1]))
+        if tgt.shape[-1] < self.seg_samples:
+            tgt = torch.nn.functional.pad(tgt, (0, self.seg_samples - tgt.shape[-1]))
+        return mix, tgt
 
-        # pad last segment if needed (should be rare due to indexing)
-        if mix_seg.shape[-1] < self.seg_samples:
-            pad = self.seg_samples - mix_seg.shape[-1]
-            mix_seg = torch.nn.functional.pad(mix_seg, (0, pad))
-            tgt_seg = torch.nn.functional.pad(tgt_seg, (0, pad))
-        return mix_seg, tgt_seg
+
+def _read_stem_mp4(path: Path, sample_rate: int, stem_id: int | None, start_sec: float | None, duration_sec: float | None) -> torch.Tensor:
+    try:
+        import stempeg
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "This MUSDB layout uses *.stem.mp4. Install 'stempeg' and ensure ffmpeg is available."
+        ) from e
+
+    audio, sr = stempeg.read_stems(
+        str(path),
+        stem_id=stem_id,
+        start=start_sec,
+        duration=duration_sec,
+        sample_rate=sample_rate,
+    )
+    if sr != sample_rate:
+        raise ValueError(f"Expected sample_rate={sample_rate}, got {sr} for {path}")
+
+    # stempeg returns either (stems, samples, channels) or (samples, channels) depending on stem_id
+    if audio.ndim == 3:
+        # if multiple stems, take first one returned
+        audio = audio[0]
+    # now (samples, channels)
+    x = torch.from_numpy(audio).float().transpose(0, 1).contiguous()  # (C, T)
+    return x
+
+
+def _load_mixture(tp: TrackPaths, sample_rate: int) -> torch.Tensor:
+    if not tp.is_stem_mp4:
+        return load_audio(tp.mixture, sample_rate=sample_rate)
+    # mixture is commonly stem 0
+    return _read_stem_mp4(tp.mixture, sample_rate=sample_rate, stem_id=0, start_sec=None, duration_sec=None)
+
+
+def _load_mixture_segment(tp: TrackPaths, sample_rate: int, start_sample: int, num_samples: int) -> torch.Tensor:
+    if not tp.is_stem_mp4:
+        mix = load_audio(tp.mixture, sample_rate=sample_rate)
+        return mix[:, start_sample : start_sample + num_samples]
+    start_sec = float(start_sample) / float(sample_rate)
+    duration_sec = float(num_samples) / float(sample_rate)
+    return _read_stem_mp4(tp.mixture, sample_rate=sample_rate, stem_id=0, start_sec=start_sec, duration_sec=duration_sec)
+
+
+def _load_target_segment(tp: TrackPaths, stem: str, sample_rate: int, start_sample: int, num_samples: int) -> torch.Tensor:
+    if not tp.is_stem_mp4:
+        tgt = load_audio(tp.stems[stem], sample_rate=sample_rate)
+        return tgt[:, start_sample : start_sample + num_samples]
+    stem_id = _STEMPEG_STEM_INDEX.get(stem)
+    if stem_id is None:
+        raise ValueError(f"Unknown stem: {stem}")
+    start_sec = float(start_sample) / float(sample_rate)
+    duration_sec = float(num_samples) / float(sample_rate)
+    return _read_stem_mp4(tp.mixture, sample_rate=sample_rate, stem_id=stem_id, start_sec=start_sec, duration_sec=duration_sec)
 
