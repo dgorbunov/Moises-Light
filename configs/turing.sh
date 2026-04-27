@@ -16,7 +16,7 @@ cd "${SLURM_SUBMIT_DIR}"
 
 # Turing docs recommend loading python/cuda modules for GPU jobs.
 module load python
-module load cuda/12.2
+module load cuda
 
 mkdir -p logs
 
