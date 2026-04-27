@@ -17,18 +17,28 @@ cd "${SLURM_SUBMIT_DIR}"
 # Turing docs recommend loading python/cuda modules for GPU jobs.
 module load python
 module load cuda
+# stempeg (required by musdb import path) needs ffmpeg + ffprobe binaries.
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+  module load ffmpeg >/dev/null 2>&1 || true
+fi
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+  echo "ERROR: ffmpeg and ffprobe are required (musdb -> stempeg)."
+  echo "Try checking available modules with: module avail ffmpeg"
+  exit 1
+fi
 
 mkdir -p logs
 
 # ---- Python environment setup ----
-if [ ! -d ".venv" ]; then
-  python -m venv .venv
+# Rebuild venv each run for deterministic installs on cluster jobs.
+if [ -d ".venv" ]; then
+  rm -rf .venv
 fi
+python -m venv .venv
 source .venv/bin/activate
 
 python -m pip install --upgrade pip
 
-# Install a PyTorch CUDA build that matches cluster drivers.
 # Prefer cu129 (for CUDA 12.9 module), fall back to cu128 if unavailable.
 TORCH_CUDA_INDEX=""
 for cuda_tag in cu129 cu128; do
@@ -52,12 +62,16 @@ python -m pip install -e .
 
 python - <<'PY'
 import torch
+import musdb
+import lightning
 print("Torch version:", torch.__version__)
 print("Torch CUDA build:", torch.version.cuda)
 print("CUDA available:", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("CUDA device count:", torch.cuda.device_count())
     print("CUDA device 0:", torch.cuda.get_device_name(0))
+print("musdb version:", getattr(musdb, "__version__", "unknown"))
+print("lightning version:", getattr(lightning, "__version__", "unknown"))
 PY
 
 MUSDB_ROOT="/path/to/musdb18hq"
