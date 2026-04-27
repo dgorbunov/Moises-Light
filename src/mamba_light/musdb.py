@@ -114,7 +114,7 @@ def iter_segment_starts(num_samples: int, seg_samples: int, overlap: float) -> I
         yield start
 
 
-class MusdbSegmentDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+class MusdbSegmentDataset(Dataset):
     """
     Returns (mixture, target) segments as (C, T).
     One epoch iterates over all precomputed segments once (paper behavior).
