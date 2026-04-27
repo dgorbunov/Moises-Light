@@ -1,0 +1,35 @@
+musdb_root: "C:/Users/danie/Documents/Datasets/musdb18hq"
+target_stem: "vocals"
+
+sample_rate: 44100
+segment_seconds: 9.0
+train_overlap: 0.75
+eval_overlap: 0.50
+
+batch_size: 2
+num_workers: 4
+epochs: 300
+lr: 0.0002
+lr_patience_epochs: 20
+lr_factor: 0.9
+early_stop_patience_epochs: 50
+amp: true
+
+use_multires_loss: true
+stft:
+  n_fft: 6144
+  hop_length: 1024
+  win_length: 6144
+  freq_bins: 2048
+multires:
+  fft_sizes: [1024, 2048, 4096]
+  hop_sizes: [256, 512, 1024]
+  win_lengths: [1024, 2048, 4096]
+
+nband: 4
+g: 56
+nrope: 5
+nsplit_enc: 3
+nsplit_dec: 1
+
+out_dir: "runs/moises_light"

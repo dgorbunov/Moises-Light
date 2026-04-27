@@ -1,0 +1,9 @@
+torch
+torchaudio
+torch-audiomentations
+numpy
+soundfile
+tqdm
+pyyaml
+einops
+mir_eval
