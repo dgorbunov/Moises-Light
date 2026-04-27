@@ -76,7 +76,9 @@ class MoisesLightningModule(L.LightningModule):
             tgt_wav = target.detach().cpu()
             for i in range(pred_wav.shape[0]):
                 csdr = chunk_level_sdr(tgt_wav[i], pred_wav[i], sample_rate=self.cfg.sample_rate, chunk_seconds=1.0)
-                self.val_csdr.append(float(csdr.song_median_sdr))
+                m = float(csdr.song_median_sdr)
+                if m == m:  # skip NaN (e.g. silent reference stem)
+                    self.val_csdr.append(m)
         return val_loss
 
     def on_validation_epoch_end(self) -> None:
