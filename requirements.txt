@@ -1,5 +1,6 @@
 torch
 torchaudio
+lightning
 torch-audiomentations
 numpy
 soundfile
@@ -8,3 +9,4 @@ pyyaml
 einops
 mir_eval
 stempeg
+musdb

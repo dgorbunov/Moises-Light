@@ -38,14 +38,21 @@ class JointAugment(nn.Module):
 
         self.has_ta = PitchShift is not None
         if self.has_ta:
-            self.pol = PolarityInversion(p=0.5)
-            self.shift = Shift(min_shift=-0.25, max_shift=0.25, shift_unit="fraction", p=0.5)
+            self.shift = Shift(
+                min_shift=-0.25,
+                max_shift=0.25,
+                shift_unit="fraction",
+                p=0.5,
+                output_type="tensor",
+            )
             self.pitch = PitchShift(
                 sample_rate=self.sample_rate,
                 min_transpose_semitones=-2.0,
                 max_transpose_semitones=2.0,
                 p=0.3,
+                output_type="tensor",
             )
+            self.pol = PolarityInversion(p=0.5, output_type="tensor")
         else:
             self.pol = None
             self.shift = None

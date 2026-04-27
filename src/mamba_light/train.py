@@ -100,6 +100,8 @@ def train(cfg: TrainConfig) -> None:
         nsplit_enc=cfg.nsplit_enc,
         nsplit_dec=cfg.nsplit_dec,
         depth=3,
+        latent_dim=cfg.latent_dim,
+        freq_bins=cfg.stft.freq_bins,
     ).to(device)
 
     aug = JointAugment(sample_rate=cfg.sample_rate)
@@ -166,6 +168,7 @@ def train(cfg: TrainConfig) -> None:
                 "nsplit_enc": cfg.nsplit_enc,
                 "nsplit_dec": cfg.nsplit_dec,
                 "depth": 3,
+                "latent_dim": cfg.latent_dim,
                 "target_stem": cfg.target_stem,
                 "stft": asdict(cfg.stft),
                 "sample_rate": cfg.sample_rate,

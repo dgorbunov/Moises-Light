@@ -11,15 +11,12 @@ from mamba_light.audio_io import load_audio
 from mamba_light.config import TrainConfig
 from mamba_light.infer import load_model_from_ckpt, separate_track
 from mamba_light.metrics import chunk_level_sdr
-from mamba_light.musdb import STEMS, discover_tracks
+from mamba_light.musdb import discover_tracks
 from mamba_light.stft import STFTParams
 
 
 @torch.no_grad()
 def evaluate(cfg: TrainConfig, ckpt_path: str | Path) -> dict[str, float]:
-    if cfg.target_stem not in STEMS:
-        raise ValueError(f"cfg.target_stem must be one of {STEMS}")
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_model_from_ckpt(ckpt_path, device=device)
 

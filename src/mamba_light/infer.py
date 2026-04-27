@@ -55,6 +55,8 @@ def load_model_from_ckpt(ckpt_path: str | Path, device: torch.device) -> MoisesL
         nsplit_enc=h["nsplit_enc"],
         nsplit_dec=h["nsplit_dec"],
         depth=h["depth"],
+        latent_dim=h.get("latent_dim", 128),
+        freq_bins=h.get("stft", {}).get("freq_bins", 2048),
     )
     model.load_state_dict(ckpt["model"])
     model.to(device)

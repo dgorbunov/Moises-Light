@@ -1,8 +1,9 @@
-musdb_root: "C:/Users/danie/Documents/Datasets/musdb18hq"
+musdb_root: "/path/to/musdb18hq"
+download_preview: false
 target_stem: "vocals"
 
 sample_rate: 44100
-segment_seconds: 9.0
+segment_seconds: 7.0
 train_overlap: 0.75
 eval_overlap: 0.50
 
@@ -14,6 +15,9 @@ lr_patience_epochs: 20
 lr_factor: 0.9
 early_stop_patience_epochs: 50
 amp: true
+debug: false
+debug_num_tracks: 2
+debug_epochs: 10
 
 use_multires_loss: true
 stft:
@@ -31,5 +35,15 @@ g: 56
 nrope: 5
 nsplit_enc: 3
 nsplit_dec: 1
+latent_dim: 128
+
+trainer:
+  accelerator: "gpu"
+  devices: 2
+  strategy: "ddp"
+  precision: "16-mixed"
+  max_epochs: 300
+  log_every_n_steps: 20
+  deterministic: false
 
 out_dir: "runs/moises_light"

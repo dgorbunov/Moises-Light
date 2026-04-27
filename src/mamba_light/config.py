@@ -6,6 +6,17 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class TrainerConfig:
+    accelerator: str = "gpu"
+    devices: int = 2
+    strategy: str = "ddp"
+    precision: str = "16-mixed"
+    max_epochs: int = 300
+    log_every_n_steps: int = 20
+    deterministic: bool = False
+
+
+@dataclass(frozen=True)
 class MultiResSTFTConfig:
     fft_sizes: tuple[int, ...] = (1024, 2048, 4096)
     hop_sizes: tuple[int, ...] = (256, 512, 1024)
@@ -23,8 +34,9 @@ class STFTConfig:
 @dataclass(frozen=True)
 class TrainConfig:
     musdb_root: str
+    download_preview: bool = False
     sample_rate: int = 44100
-    segment_seconds: float = 9.0
+    segment_seconds: float = 7.0
     train_overlap: float = 0.75
     eval_overlap: float = 0.50
 
@@ -40,7 +52,7 @@ class TrainConfig:
     seed: int = 1337
     amp: bool = True
 
-    # single-stem training (paper trains 1 model per stem)
+    # single-stem training (paper trains one model per stem)
     target_stem: str = "vocals"  # vocals|drums|bass|other
 
     # loss
@@ -54,9 +66,13 @@ class TrainConfig:
     nrope: int = 5
     nsplit_enc: int = 3
     nsplit_dec: int = 1
+    latent_dim: int = 128
 
     out_dir: str = "runs/moises_light"
-
+    trainer: TrainerConfig = TrainerConfig()
+    debug: bool = False
+    debug_num_tracks: int = 2
+    debug_epochs: int = 10
 
 def load_config(path: str | Path) -> TrainConfig:
     import yaml
@@ -67,5 +83,7 @@ def load_config(path: str | Path) -> TrainConfig:
         data["stft"] = STFTConfig(**data["stft"])
     if "multires" in data:
         data["multires"] = MultiResSTFTConfig(**data["multires"])
+    if "trainer" in data:
+        data["trainer"] = TrainerConfig(**data["trainer"])
     return TrainConfig(**data)
 

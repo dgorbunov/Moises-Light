@@ -6,7 +6,7 @@ WPI CS 541 Final Project
 This repo contains a runnable baseline inspired by **“Moises-Light: Resource-efficient Band-split U-Net For Music Source Separation” (arXiv:2510.06785v1)**.
 
 ### What’s implemented
-- **Single-stem training** (paper trains one model per stem): `vocals`, `drums`, `bass`, `other`
+- **Single-stem training** (choose one: `vocals`, `drums`, `bass`, `other`)
 - **STFT setup**: window \(6144\), hop \(1024\), truncate to \(2048\) bins
 - **Chunking**: train with 75% overlap; eval with 50% overlap-add
 - **Augmentations**: polarity inversion, pitch shift, time shift, stereo channel flip (jointly applied to mix+target)
@@ -17,7 +17,7 @@ This repo contains a runnable baseline inspired by **“Moises-Light: Resource-e
 
 ```bash
 python -m venv .venv
-.\.venv\Scripts\activate
+. .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
@@ -32,10 +32,58 @@ If you have a different export, adapt it or symlink to match.
 ### Train (example)
 
 ```bash
-python .\scripts\train.py --musdb-root "C:\Users\danie\Documents\Datasets\musdb18hq" --target-stem vocals --out-dir runs\moises_light
+python scripts/train.py --musdb-root "/path/to/musdb18hq" --target-stem vocals --out-dir runs/moises_light
 ```
 
 This writes checkpoints under `runs/moises_light/<stem>/best.pt`.
+
+### Train with PyTorch Lightning (2x GPU DDP)
+
+```bash
+python scripts/train_lightning.py --config configs/vocals.yaml
+```
+
+This uses:
+- `accelerator: gpu`
+- `devices: 2`
+- `strategy: ddp`
+- `precision: 16-mixed`
+
+For quick verification on 2 tracks and 10 epochs:
+
+```bash
+python scripts/train_lightning.py --config configs/vocals.yaml --debug
+```
+
+Debug metrics are saved to `runs/moises_light/vocals/metrics_debug.json`, and an eval-compatible checkpoint is exported to `runs/moises_light/vocals/best_legacy.pt`.
+
+To validate the training pipeline without downloading full MUSDB first, use musdb's preview clips:
+
+```bash
+python scripts/train_lightning.py --download-preview --target-stem vocals --debug
+```
+
+You can also set `download_preview: true` in `configs/vocals.yaml`.
+
+### Recommended commands
+
+Smoke test on Mac (M3/MPS, quick pipeline validation):
+
+```bash
+python scripts/train_lightning.py --download-preview --target-stem vocals --debug
+python scripts/validate_checkpoint.py --config configs/vocals.yaml --ckpt runs/moises_light/vocals/best_legacy.pt --download-preview --subset test --track-index 0 --save-audio runs/moises_light/vocals/validation_estimate.wav --save-originals
+```
+
+Full training on 2x NVIDIA A30 (DDP + mixed precision):
+
+```bash
+python scripts/train_lightning.py --config configs/vocals.yaml --musdb-root "/path/to/musdb18hq" --target-stem vocals
+python scripts/validate_checkpoint.py --config configs/vocals.yaml --ckpt runs/moises_light/vocals/best_legacy.pt --subset test --track-index 0 --save-audio runs/moises_light/vocals/validation_estimate.wav --save-originals
+```
+
+With `--save-originals`, the script also writes comparison files next to the estimate:
+- `validation_estimate_mixture.wav`
+- `validation_estimate_reference_vocals.wav`
 
 ### Evaluate (example)
 
@@ -43,7 +91,7 @@ Create a minimal config YAML (example `configs/vocals.yaml`) or reuse the saved 
 The evaluator uses `cfg.target_stem` to choose the reference stem.
 
 ```bash
-python .\scripts\eval.py --config configs\vocals.yaml --ckpt runs\moises_light\vocals\best.pt
+python scripts/eval.py --config configs/vocals.yaml --ckpt runs/moises_light/vocals/best_legacy.pt
 ```
 
 ### Validation split note
