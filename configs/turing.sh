@@ -76,7 +76,7 @@ PY
 
 STEM="vocals"
 OUT_DIR="runs/moises_light"
-TRAIN_CONFIG="configs/vocals.yaml"
+TRAIN_CONFIG="configs/vocals_short.yaml"
 
 if [ ! -f "${TRAIN_CONFIG}" ]; then
   echo "Missing training config: ${TRAIN_CONFIG}"
