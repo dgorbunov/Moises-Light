@@ -43,7 +43,6 @@ class TrainConfig:
 
     batch_size: int = 2
     num_workers: int = 4
-    epochs: int = 300
 
     lr: float = 2e-4
     lr_patience_epochs: int = 20
@@ -51,17 +50,13 @@ class TrainConfig:
     early_stop_patience_epochs: int = 50
 
     seed: int = 1337
-    amp: bool = True
 
-    # single-stem training (paper trains one model per stem)
-    target_stem: str = "vocals"  # vocals|drums|bass|other
+    target_stem: str = "vocals"
 
-    # loss
     use_multires_loss: bool = True
     multires: MultiResSTFTConfig = MultiResSTFTConfig()
     stft: STFTConfig = STFTConfig()
 
-    # model hyperparams (paper defaults)
     nband: int = 4
     g: int = 56
     nrope: int = 5
@@ -75,11 +70,11 @@ class TrainConfig:
     debug_num_tracks: int = 2
     debug_epochs: int = 10
 
+
 def load_config(path: str | Path) -> TrainConfig:
     import yaml
 
     data: dict[str, Any] = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    # nested dataclasses
     if "stft" in data:
         data["stft"] = STFTConfig(**data["stft"])
     if "multires" in data:
@@ -87,4 +82,3 @@ def load_config(path: str | Path) -> TrainConfig:
     if "trainer" in data:
         data["trainer"] = TrainerConfig(**data["trainer"])
     return TrainConfig(**data)
-

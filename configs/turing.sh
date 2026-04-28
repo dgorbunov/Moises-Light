@@ -86,7 +86,7 @@ fi
 
 python - <<'PY'
 import os
-from mamba_light.config import load_config
+from config import load_config
 cfg = load_config(os.environ["TRAIN_CONFIG"])
 if abs(float(cfg.segment_seconds) - 7.0) > 1e-9:
     raise SystemExit(f"Expected segment_seconds=7.0, got {cfg.segment_seconds}")
@@ -100,11 +100,11 @@ TRAIN_ARGS=(
   --out-dir "${OUT_DIR}"
 )
 
-python scripts/train_lightning.py \
+python scripts/train.py \
   "${TRAIN_ARGS[@]}"
 
 # ---- One-track validation after training ----
-python scripts/validate_checkpoint.py \
+python scripts/validate.py \
   --config "${TRAIN_CONFIG}" \
   --ckpt "${OUT_DIR}/${STEM}/best_legacy.pt" \
   --subset test \

@@ -8,33 +8,11 @@ import lightning as L
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-
-def _looks_like_wav_layout(root: Path) -> bool:
-    train_dir = root / "train"
-    if not train_dir.exists():
-        train_dir = root / "MUSDB18" / "train"
-    if not train_dir.exists():
-        return False
-    for track_dir in sorted([p for p in train_dir.iterdir() if p.is_dir()])[:5]:
-        if (track_dir / "mixture.wav").exists():
-            return True
-    return False
+from dataset_utils import looks_like_wav_layout, split_test_tracks
 
 
 class MusdbTrainChunkDataset(Dataset):
-    """
-    Uses musdb DB tracks and samples random 7-second chunks.
-    """
-
-    def __init__(
-        self,
-        tracks: list,
-        target_stem: str,
-        sample_rate: int,
-        segment_seconds: float = 7.0,
-        chunks_per_track: int = 8,
-        max_samples: int = 0,
-    ) -> None:
+    def __init__(self, tracks: list, target_stem: str, sample_rate: int, segment_seconds: float = 7.0, chunks_per_track: int = 8, max_samples: int = 0) -> None:
         self.tracks = tracks
         self.target_stem = target_stem
         self.sample_rate = sample_rate
@@ -51,17 +29,10 @@ class MusdbTrainChunkDataset(Dataset):
         track.chunk_duration = self.segment_seconds
         max_start = max(0.0, float(track.duration) - self.segment_seconds)
         track.chunk_start = random.uniform(0.0, max_start) if max_start > 0.0 else 0.0
-
-        mix = torch.from_numpy(track.audio.T).float()  # (2, T)
-        tgt = torch.from_numpy(track.targets[self.target_stem].audio.T).float()
-        return mix, tgt
+        return torch.from_numpy(track.audio.T).float(), torch.from_numpy(track.targets[self.target_stem].audio.T).float()
 
 
-class MusdbValFirstChunkDataset(Dataset):
-    """
-    Validation on deterministic first 7 seconds for each test track.
-    """
-
+class MusdbValRandomChunkDataset(Dataset):
     def __init__(self, tracks: list, target_stem: str, segment_seconds: float = 7.0, max_samples: int = 0) -> None:
         self.tracks = tracks
         self.target_stem = target_stem
@@ -74,14 +45,13 @@ class MusdbValFirstChunkDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         track = self.tracks[idx]
-        track.chunk_start = 0.0
         track.chunk_duration = self.segment_seconds
-        mix = torch.from_numpy(track.audio.T).float()
-        tgt = torch.from_numpy(track.targets[self.target_stem].audio.T).float()
-        return mix, tgt
+        max_start = max(0.0, float(track.duration) - self.segment_seconds)
+        track.chunk_start = random.uniform(0.0, max_start) if max_start > 0.0 else 0.0
+        return torch.from_numpy(track.audio.T).float(), torch.from_numpy(track.targets[self.target_stem].audio.T).float()
 
 
-class MusdbLightningDataModule(L.LightningDataModule):
+class MusdbDataModule(L.LightningDataModule):
     def __init__(
         self,
         musdb_root: str,
@@ -108,73 +78,35 @@ class MusdbLightningDataModule(L.LightningDataModule):
         self.chunks_per_track = chunks_per_track
         self.max_train_samples = max_train_samples
         self.max_val_samples = max_val_samples
-
         self._train_ds: MusdbTrainChunkDataset | None = None
-        self._val_ds: MusdbValFirstChunkDataset | None = None
+        self._val_ds: MusdbValRandomChunkDataset | None = None
 
     def setup(self, stage: str | None = None) -> None:
+        del stage
         try:
             import musdb
         except Exception as e:
-            raise RuntimeError(
-                "musdb package is required for LightningDataModule. "
-                "Install with `pip install musdb`."
-            ) from e
-
+            raise RuntimeError("musdb package is required for DataModule. Install with `pip install musdb`.") from e
         root = Path(self.musdb_root).expanduser()
-        is_wav = _looks_like_wav_layout(root)
+        is_wav = looks_like_wav_layout(root, subset="train")
         if not is_wav:
-            warnings.warn(
-                "WAV MUSDB layout not detected. Falling back to STEM decoding (is_wav=False), "
-                "which is slower and requires ffmpeg/stempeg.",
-                stacklevel=2,
-            )
+            warnings.warn("WAV MUSDB layout not detected. Falling back to STEM decoding (is_wav=False).", stacklevel=2)
         train_db = musdb.DB(root=str(root), subsets="train", split="train", is_wav=is_wav)
         val_db = musdb.DB(root=str(root), subsets="test", is_wav=is_wav)
-
         train_tracks = list(train_db.tracks)
-        val_tracks = list(val_db.tracks)
+        val_tracks = split_test_tracks(list(val_db.tracks), partition="val")
         if self.debug:
             train_tracks = train_tracks[: self.debug_num_tracks]
             val_tracks = val_tracks[: self.debug_num_tracks]
-
-        self._train_ds = MusdbTrainChunkDataset(
-            tracks=train_tracks,
-            target_stem=self.target_stem,
-            sample_rate=self.sample_rate,
-            segment_seconds=self.segment_seconds,
-            chunks_per_track=self.chunks_per_track,
-            max_samples=self.max_train_samples,
-        )
-        self._val_ds = MusdbValFirstChunkDataset(
-            tracks=val_tracks,
-            target_stem=self.target_stem,
-            segment_seconds=self.segment_seconds,
-            max_samples=self.max_val_samples,
-        )
+        self._train_ds = MusdbTrainChunkDataset(train_tracks, self.target_stem, self.sample_rate, self.segment_seconds, self.chunks_per_track, self.max_train_samples)
+        self._val_ds = MusdbValRandomChunkDataset(val_tracks, self.target_stem, self.segment_seconds, self.max_val_samples)
 
     def train_dataloader(self) -> DataLoader:
         if self._train_ds is None:
-            raise RuntimeError("DataModule.setup() must run before requesting dataloaders.")
-        return DataLoader(
-            self._train_ds,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=True,
-            persistent_workers=self.num_workers > 0,
-            drop_last=True,
-        )
+            raise RuntimeError("setup() must run before requesting dataloaders.")
+        return DataLoader(self._train_ds, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, persistent_workers=self.num_workers > 0, drop_last=True)
 
     def val_dataloader(self) -> DataLoader:
         if self._val_ds is None:
-            raise RuntimeError("DataModule.setup() must run before requesting dataloaders.")
-        return DataLoader(
-            self._val_ds,
-            batch_size=1,
-            shuffle=False,
-            num_workers=max(1, self.num_workers // 2),
-            pin_memory=True,
-            persistent_workers=self.num_workers > 1,
-            drop_last=False,
-        )
+            raise RuntimeError("setup() must run before requesting dataloaders.")
+        return DataLoader(self._val_ds, batch_size=1, shuffle=False, num_workers=max(1, self.num_workers // 2), pin_memory=True, persistent_workers=self.num_workers > 1, drop_last=False)

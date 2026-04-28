@@ -12,23 +12,12 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from mamba_light.audio_io import save_audio
-from mamba_light.config import TrainConfig, load_config
-from mamba_light.infer import load_model_from_ckpt, separate_track
-from mamba_light.metrics import chunk_level_sdr
-from mamba_light.stft import STFTParams
-
-
-def _looks_like_wav_layout(root: Path) -> bool:
-    train_dir = root / "train"
-    if not train_dir.exists():
-        train_dir = root / "MUSDB18" / "train"
-    if not train_dir.exists():
-        return False
-    for track_dir in sorted([p for p in train_dir.iterdir() if p.is_dir()])[:5]:
-        if (track_dir / "mixture.wav").exists():
-            return True
-    return False
+from audio_io import save_audio
+from config import TrainConfig, load_config
+from dataset_utils import looks_like_wav_layout, split_test_tracks
+from infer import load_model_from_ckpt, separate_track
+from metrics import chunk_level_sdr
+from stft import STFTParams
 
 
 def _parse_args() -> argparse.Namespace:
@@ -37,7 +26,7 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--config", type=str, required=True, help="Train/eval config YAML path")
     p.add_argument("--ckpt", type=str, required=True, help="Checkpoint path (e.g., best_legacy.pt)")
-    p.add_argument("--subset", type=str, default="test", choices=("train", "test"), help="MUSDB subset to sample from")
+    p.add_argument("--subset", type=str, default="val", choices=("train", "val", "test"), help="MUSDB subset to sample from")
     p.add_argument("--track-index", type=int, default=0, help="Track index within selected subset")
     p.add_argument("--save-audio", type=str, default="", help="Optional output wav path for separated estimate")
     p.add_argument(
@@ -60,10 +49,15 @@ def _load_track_audio(
 
     root = Path(cfg.musdb_root).expanduser()
     db_kwargs: dict[str, object] = {"root": str(root)}
-    is_wav = _looks_like_wav_layout(root)
+    is_wav = looks_like_wav_layout(root, subset=subset)
 
-    db = musdb.DB(subsets=subset, is_wav=is_wav, **db_kwargs)
+    musdb_subset = "train" if subset == "train" else "test"
+    db = musdb.DB(subsets=musdb_subset, is_wav=is_wav, **db_kwargs)
     tracks = list(db.tracks)
+    if subset == "val":
+        tracks = split_test_tracks(tracks, partition="val")
+    elif subset == "test":
+        tracks = split_test_tracks(tracks, partition="test")
     if not tracks:
         raise RuntimeError(f"No tracks found for subset='{subset}'.")
 
@@ -101,7 +95,12 @@ def main() -> None:
         sample_rate=cfg.sample_rate,
         device=device,
     )
-    csdr = chunk_level_sdr(ref, est, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
+    csdr_model = chunk_level_sdr(ref, est, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
+    csdr_mix = chunk_level_sdr(ref, mix, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
+
+    est_rms = float(torch.sqrt(torch.mean(est**2)).item())
+    ref_rms = float(torch.sqrt(torch.mean(ref**2)).item())
+    mix_rms = float(torch.sqrt(torch.mean(mix**2)).item())
 
     saved_files: dict[str, str] = {}
     if args.save_audio:
@@ -122,8 +121,14 @@ def main() -> None:
         "target_stem": cfg.target_stem,
         "subset": args.subset,
         "track_index": args.track_index,
-        "song_median_cSDR": float(csdr.song_median_sdr),
-        "n_chunks": int(csdr.n_chunks),
+        "song_median_cSDR": float(csdr_model.song_median_sdr),
+        "song_median_cSDR_mixture_baseline": float(csdr_mix.song_median_sdr),
+        "song_median_cSDR_delta_vs_mixture": float(csdr_model.song_median_sdr - csdr_mix.song_median_sdr),
+        "n_chunks": int(csdr_model.n_chunks),
+        "estimate_rms": est_rms,
+        "reference_rms": ref_rms,
+        "mixture_rms": mix_rms,
+        "estimate_to_reference_rms_ratio": float(est_rms / max(ref_rms, 1e-12)),
         "checkpoint": str(args.ckpt),
         "saved_files": saved_files,
     }

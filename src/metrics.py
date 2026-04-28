@@ -4,29 +4,24 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-
 from mir_eval.separation import bss_eval_sources
 
 
 def _is_effectively_silent(wav: np.ndarray, eps: float = 1e-8) -> bool:
-    """True if signal is all zeros / negligible energy (mir_eval rejects all-zero reference)."""
     return bool(np.mean(np.square(wav)) <= eps)
 
 
 def _sdr_1src(ref: np.ndarray, est: np.ndarray) -> float:
-    # ref/est: (T,)
-    if _is_effectively_silent(ref):
-        # No meaningful SDR when reference is silent; skip mir_eval (would raise).
+    if _is_effectively_silent(ref) or _is_effectively_silent(est):
         return float("nan")
-    sdr, _, _, _ = bss_eval_sources(ref[None, :], est[None, :])
+    try:
+        sdr, _, _, _ = bss_eval_sources(ref[None, :], est[None, :])
+    except ValueError:
+        return float("nan")
     return float(sdr[0])
 
 
 def stereo_sdr(ref: torch.Tensor, est: torch.Tensor) -> float:
-    """
-    ref/est: (2, T)
-    Returns average SDR over channels.
-    """
     r = ref.detach().cpu().numpy()
     e = est.detach().cpu().numpy()
     if r.shape[0] != 2 or e.shape[0] != 2:
@@ -51,11 +46,6 @@ class CSDRResult:
 
 
 def chunk_level_sdr(ref: torch.Tensor, est: torch.Tensor, sample_rate: int, chunk_seconds: float = 1.0) -> CSDRResult:
-    """
-    Implements paper's cSDR description:
-    - compute SDR over 1s chunks
-    - take median across chunks for the song
-    """
     if ref.shape != est.shape:
         raise ValueError("ref and est must have same shape")
     chunk_len = int(round(chunk_seconds * sample_rate))
@@ -65,12 +55,9 @@ def chunk_level_sdr(ref: torch.Tensor, est: torch.Tensor, sample_rate: int, chun
 
     vals: list[float] = []
     for start in range(0, t - chunk_len + 1, chunk_len):
-        r = ref[:, start : start + chunk_len]
-        e = est[:, start : start + chunk_len]
-        v = stereo_sdr(r, e)
+        v = stereo_sdr(ref[:, start : start + chunk_len], est[:, start : start + chunk_len])
         if not np.isnan(v):
             vals.append(v)
     if not vals:
         return CSDRResult(song_median_sdr=float("nan"), n_chunks=0)
     return CSDRResult(song_median_sdr=float(np.median(vals)), n_chunks=len(vals))
-

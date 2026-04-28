@@ -6,6 +6,17 @@ requires-python = ">=3.10"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+py-modules = [
+  "audio_io",
+  "augment",
+  "config",
+  "data",
+  "dataset_utils",
+  "infer",
+  "losses",
+  "metrics",
+  "model",
+  "module",
+  "overlap_add",
+  "stft",
+]

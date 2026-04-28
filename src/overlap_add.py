@@ -4,13 +4,6 @@ import torch
 
 
 def overlap_add(chunks: torch.Tensor, hop: int) -> torch.Tensor:
-    """
-    Reconstruct audio from overlapping chunks using simple sum+divide weighting.
-
-    - chunks: (N, C, T)
-    - hop: hop size in samples
-    returns: (C, out_T)
-    """
     if chunks.dim() != 3:
         raise ValueError("chunks must be (N, C, T)")
     n, c, t = chunks.shape
@@ -21,6 +14,4 @@ def overlap_add(chunks: torch.Tensor, hop: int) -> torch.Tensor:
         start = i * hop
         out[:, start : start + t] += chunks[i]
         w[:, start : start + t] += 1.0
-    out = out / w.clamp_min(1.0)
-    return out
-
+    return out / w.clamp_min(1.0)

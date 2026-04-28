@@ -5,14 +5,6 @@ WPI CS 541 Final Project
 
 This repo contains a runnable baseline inspired by **“Moises-Light: Resource-efficient Band-split U-Net For Music Source Separation” (arXiv:2510.06785v1)**.
 
-### What’s implemented
-- **Single-stem training** (choose one: `vocals`, `drums`, `bass`, `other`)
-- **STFT setup**: window \(6144\), hop \(1024\), truncate to \(2048\) bins
-- **Chunking**: train with 75% overlap; eval with 50% overlap-add
-- **Augmentations**: polarity inversion, pitch shift, time shift, stereo channel flip (jointly applied to mix+target)
-- **Loss**: complex-spectrogram L1 + optional multi-resolution complex STFT MAE
-- **Metric**: chunk-level SDR (cSDR) over 1s chunks (median per song, then median over songs)
-
 ### Install
 
 ```bash
@@ -22,71 +14,59 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-### MUSDB18-HQ layout
-Expected folder layout (either):
-- `<MUSDB_ROOT>/train/<track>/{mixture.wav,vocals.wav,drums.wav,bass.wav,other.wav}`
-- `<MUSDB_ROOT>/test/<track>/{...}`
+### Dataset
+- Default dataset root in configs: `~/musdb18hq` (expanded automatically)
+- Split behavior (deterministic by track name):
+  - Train: all tracks in `train/`
+  - Validation: first half of tracks in `test/`
+  - Test: second half of tracks in `test/`
+- Expected layout:
+  - `<MUSDB_ROOT>/train/<track>/{mixture.wav,vocals.wav,drums.wav,bass.wav,other.wav}`
+  - `<MUSDB_ROOT>/test/<track>/{...}`
 
-Default dataset root in configs is `~/musdb18hq` (expanded automatically).
-
-### Train (example)
-
-```bash
-python scripts/train.py --musdb-root "/path/to/musdb18hq" --target-stem vocals --out-dir runs/moises_light
-```
-
-This writes checkpoints under `runs/moises_light/<stem>/best.pt`.
-
-### Train with PyTorch Lightning
+### Train
 
 ```bash
-python scripts/train_lightning.py --config configs/vocals_long.yaml
+python scripts/train.py --config configs/vocals_long.yaml
 ```
-
-Default long config uses:
-- `accelerator: gpu`
-- `devices: 2`
-- `strategy: ddp`
-- `precision: 16-mixed`
-
-Debug metrics are saved to `runs/moises_light/vocals/metrics_debug.json`, and an eval-compatible checkpoint is exported to `runs/moises_light/vocals/best_legacy.pt`.
 
 Preset configs:
 
 ```bash
 # quick sanity run (full dataset, tiny sample caps)
-python scripts/train_lightning.py --config configs/vocals_short.yaml
+python scripts/train.py --config configs/vocals_short.yaml
 
 # medium run (full MUSDB, capped epoch size)
-python scripts/train_lightning.py --config configs/vocals_medium.yaml
+python scripts/train.py --config configs/vocals_medium.yaml
 
 # long run (full MUSDB, uncapped sample counts)
-python scripts/train_lightning.py --config configs/vocals_long.yaml
+python scripts/train.py --config configs/vocals_long.yaml
 ```
 
-### Forward-pass validation
-
-Run one forward-pass validation on a trained checkpoint:
+### Optional: Validate One Track
 
 ```bash
-python scripts/validate_checkpoint.py --config configs/vocals_short.yaml --ckpt runs/moises_light/vocals/best_legacy.pt --subset test --track-index 0 --save-audio runs/moises_light/vocals/validation_estimate.wav --save-originals
+python scripts/validate.py --config configs/vocals_short.yaml --ckpt runs/moises_light/vocals/best_legacy.pt --subset val --track-index 0 --save-audio runs/moises_light/vocals/validation_estimate.wav --save-originals
 ```
 
-With `--save-originals`, the script also writes comparison files next to the estimate:
-- `validation_estimate_mixture.wav`
-- `validation_estimate_reference_vocals.wav`
-
-### Evaluate (example)
-
-Use one of the provided configs (for example `configs/vocals_long.yaml`).
-The evaluator uses `cfg.target_stem` to choose the reference stem.
+### Optional: Analyze Chunk Energy
 
 ```bash
-python scripts/eval.py --config configs/vocals_long.yaml --ckpt runs/moises_light/vocals/best_legacy.pt
+python scripts/analyze_chunk_energy.py --config configs/vocals_long.yaml --samples 2000
 ```
 
-### Validation split note
-MUSDB18’s 86/14 train/valid split is often stored in external metadata. If you don’t provide it, this repo uses a **deterministic fallback**:
-- looks for `musdb_valid.txt` at MUSDB root (one track folder name per line)
-- otherwise uses the **last 14 tracks** in sorted order as validation
+### Test
 
+```bash
+python scripts/test.py --config configs/vocals_long.yaml --ckpt runs/moises_light/vocals/best_legacy.pt
+```
+
+Optional:
+
+```bash
+# quick subset check
+python scripts/test.py --config configs/vocals_long.yaml --ckpt runs/moises_light/vocals/best_legacy.pt --max-tracks 5
+
+# save full per-track report
+python scripts/test.py --config configs/vocals_long.yaml --ckpt runs/moises_light/vocals/best_legacy.pt --save-json runs/moises_light/vocals/test_report.json
+```
