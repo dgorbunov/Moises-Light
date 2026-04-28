@@ -189,6 +189,9 @@ def main() -> None:
     cfg = _build_cfg(args)
 
     L.seed_everything(cfg.seed, workers=True)
+    # A30 Tensor Cores can accelerate float32 matmuls with TF32 kernels.
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision("high")
 
     run_dir = Path(cfg.out_dir) / cfg.target_stem
     run_dir.mkdir(parents=True, exist_ok=True)

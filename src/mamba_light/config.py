@@ -8,9 +8,9 @@ from typing import Any
 @dataclass(frozen=True)
 class TrainerConfig:
     accelerator: str = "gpu"
-    devices: int = 2
-    strategy: str = "ddp"
-    precision: str = "16-mixed"
+    devices: int = 1
+    strategy: str = "auto"
+    precision: str = "32-true"
     max_epochs: int = 300
     log_every_n_steps: int = 20
     deterministic: bool = False
