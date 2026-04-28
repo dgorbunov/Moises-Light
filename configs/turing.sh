@@ -74,7 +74,6 @@ print("musdb version:", getattr(musdb, "__version__", "unknown"))
 print("lightning version:", getattr(lightning, "__version__", "unknown"))
 PY
 
-MUSDB_ROOT="/path/to/musdb18hq"
 STEM="vocals"
 OUT_DIR="runs/moises_light"
 TRAIN_CONFIG="configs/vocals.yaml"
