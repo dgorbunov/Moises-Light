@@ -65,6 +65,12 @@ python scripts/train_lightning.py --download-preview --target-stem vocals --debu
 
 You can also set `download_preview: true` in `configs/vocals.yaml`.
 
+To limit epoch size for quick tests, cap sample counts:
+
+```bash
+python scripts/train_lightning.py --download-preview --target-stem vocals --max-train-samples 10 --max-val-samples 5
+```
+
 ### Recommended commands
 
 Smoke test on Mac (M3/MPS, quick pipeline validation):

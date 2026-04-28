@@ -41,6 +41,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--target-stem", type=str, default="", help="vocals|drums|bass|other")
     p.add_argument("--out-dir", type=str, default="", help="output dir for checkpoints/logs")
     p.add_argument("--download-preview", action="store_true", help="Use musdb 7-second preview download")
+    p.add_argument("--max-train-samples", type=int, default=-1, help="Cap number of train samples per epoch")
+    p.add_argument("--max-val-samples", type=int, default=-1, help="Cap number of validation samples per epoch")
     p.add_argument("--debug", action="store_true", help="Enable debug mode (2 tracks, 10 epochs)")
     p.add_argument("--resume", type=str, default="", help="Optional checkpoint path to resume from")
     return p.parse_args()
@@ -60,6 +62,10 @@ def _build_cfg(args: argparse.Namespace) -> TrainConfig:
         cfg = TrainConfig(**{**cfg.__dict__, "out_dir": args.out_dir})
     if args.download_preview and not cfg.download_preview:
         cfg = TrainConfig(**{**cfg.__dict__, "download_preview": True})
+    if args.max_train_samples >= 0:
+        cfg = TrainConfig(**{**cfg.__dict__, "max_train_samples": args.max_train_samples})
+    if args.max_val_samples >= 0:
+        cfg = TrainConfig(**{**cfg.__dict__, "max_val_samples": args.max_val_samples})
     if args.debug and not cfg.debug:
         cfg = TrainConfig(**{**cfg.__dict__, "debug": True})
     return cfg
@@ -203,6 +209,8 @@ def main() -> None:
         num_workers=cfg.num_workers,
         debug=cfg.debug,
         debug_num_tracks=cfg.debug_num_tracks,
+        max_train_samples=cfg.max_train_samples,
+        max_val_samples=cfg.max_val_samples,
     )
     module = MoisesLightningModule(cfg=cfg)
     debug_cb = DebugMetricsCallback()

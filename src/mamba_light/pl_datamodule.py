@@ -33,13 +33,15 @@ class MusdbTrainChunkDataset(Dataset):
         sample_rate: int,
         segment_seconds: float = 7.0,
         chunks_per_track: int = 8,
+        max_samples: int = 0,
     ) -> None:
         self.tracks = tracks
         self.target_stem = target_stem
         self.sample_rate = sample_rate
         self.segment_seconds = float(segment_seconds)
         self.chunks_per_track = int(chunks_per_track)
-        self._length = max(1, len(tracks) * self.chunks_per_track)
+        base_length = max(1, len(tracks) * self.chunks_per_track)
+        self._length = min(base_length, max_samples) if max_samples and max_samples > 0 else base_length
 
     def __len__(self) -> int:
         return self._length
@@ -60,13 +62,15 @@ class MusdbValFirstChunkDataset(Dataset):
     Validation on deterministic first 7 seconds for each test track.
     """
 
-    def __init__(self, tracks: list, target_stem: str, segment_seconds: float = 7.0) -> None:
+    def __init__(self, tracks: list, target_stem: str, segment_seconds: float = 7.0, max_samples: int = 0) -> None:
         self.tracks = tracks
         self.target_stem = target_stem
         self.segment_seconds = float(segment_seconds)
+        self.max_samples = max_samples
 
     def __len__(self) -> int:
-        return len(self.tracks)
+        n = len(self.tracks)
+        return min(n, self.max_samples) if self.max_samples and self.max_samples > 0 else n
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         track = self.tracks[idx]
@@ -90,6 +94,8 @@ class MusdbLightningDataModule(L.LightningDataModule):
         debug: bool = False,
         debug_num_tracks: int = 2,
         chunks_per_track: int = 8,
+        max_train_samples: int = 0,
+        max_val_samples: int = 0,
     ) -> None:
         super().__init__()
         self.musdb_root = musdb_root
@@ -102,6 +108,8 @@ class MusdbLightningDataModule(L.LightningDataModule):
         self.debug = debug
         self.debug_num_tracks = debug_num_tracks
         self.chunks_per_track = chunks_per_track
+        self.max_train_samples = max_train_samples
+        self.max_val_samples = max_val_samples
 
         self._train_ds: MusdbTrainChunkDataset | None = None
         self._val_ds: MusdbValFirstChunkDataset | None = None
@@ -117,10 +125,13 @@ class MusdbLightningDataModule(L.LightningDataModule):
 
         if self.download_preview:
             # musdb can download short 7-second preview excerpts for quick experiments.
-            # Use root only if it looks user-specified (not placeholder/empty).
-            db_kwargs: dict[str, object] = {"download": True}
+            # Always pass an explicit writable root to avoid accidental MUSDB_PATH hijacking.
             if self.musdb_root and self.musdb_root != "/path/to/musdb18hq":
-                db_kwargs["root"] = self.musdb_root
+                preview_root = Path(self.musdb_root)
+            else:
+                preview_root = Path.cwd() / ".cache" / "musdb_preview"
+            preview_root.mkdir(parents=True, exist_ok=True)
+            db_kwargs: dict[str, object] = {"download": True, "root": str(preview_root)}
             train_db = musdb.DB(subsets="train", split="train", **db_kwargs)
             val_db = musdb.DB(subsets="test", **db_kwargs)
         else:
@@ -147,11 +158,13 @@ class MusdbLightningDataModule(L.LightningDataModule):
             sample_rate=self.sample_rate,
             segment_seconds=self.segment_seconds,
             chunks_per_track=self.chunks_per_track,
+            max_samples=self.max_train_samples,
         )
         self._val_ds = MusdbValFirstChunkDataset(
             tracks=val_tracks,
             target_stem=self.target_stem,
             segment_seconds=self.segment_seconds,
+            max_samples=self.max_val_samples,
         )
 
     def train_dataloader(self) -> DataLoader:

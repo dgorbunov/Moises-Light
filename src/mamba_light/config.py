@@ -35,6 +35,8 @@ class STFTConfig:
 class TrainConfig:
     musdb_root: str
     download_preview: bool = False
+    max_train_samples: int = 0
+    max_val_samples: int = 0
     sample_rate: int = 44100
     segment_seconds: float = 7.0
     train_overlap: float = 0.75

@@ -50,9 +50,13 @@ def _load_track_audio(
 
     db_kwargs: dict[str, object] = {}
     if download_preview:
-        db_kwargs["download"] = True
         if cfg.musdb_root and cfg.musdb_root != "/path/to/musdb18hq":
-            db_kwargs["root"] = cfg.musdb_root
+            preview_root = Path(cfg.musdb_root)
+        else:
+            preview_root = Path.cwd() / ".cache" / "musdb_preview"
+        preview_root.mkdir(parents=True, exist_ok=True)
+        db_kwargs["download"] = True
+        db_kwargs["root"] = str(preview_root)
     else:
         if not cfg.musdb_root or cfg.musdb_root == "/path/to/musdb18hq":
             raise ValueError("Provide a real musdb_root in config when not using --download-preview.")

@@ -94,11 +94,15 @@ print("Config check passed: using 7-second segments.")
 PY
 
 # ---- Training on academic partition (single GPU) ----
-python scripts/train_lightning.py \
-  --config "${TRAIN_CONFIG}" \
-  --download-preview \
-  --target-stem "${STEM}" \
+TRAIN_ARGS=(
+  --config "${TRAIN_CONFIG}"
+  --download-preview
+  --target-stem "${STEM}"
   --out-dir "${OUT_DIR}"
+)
+
+python scripts/train_lightning.py \
+  "${TRAIN_ARGS[@]}"
 
 # ---- One-track validation after training ----
 python scripts/validate_checkpoint.py \

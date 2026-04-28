@@ -1,5 +1,7 @@
 musdb_root: "/home/dzzhang/Deep Learning"
 download_preview: false
+max_train_samples: 0
+max_val_samples: 0
 target_stem: "vocals"
 
 sample_rate: 44100
