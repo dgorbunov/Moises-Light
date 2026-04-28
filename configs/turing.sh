@@ -11,6 +11,40 @@
 
 set -euo pipefail
 
+# ---- CLI flags (passed through sbatch script args) ----
+# Example:
+#   sbatch configs/turing.sh --train-config configs/vocals_short.yaml --stem vocals --test-type quick
+TRAIN_CONFIG="configs/vocals_short.yaml"
+STEM="vocals"
+TEST_TYPE="quick"  # quick | full | none
+MAX_TEST_TRACKS="" # optional manual override
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --train-config)
+      TRAIN_CONFIG="$2"
+      shift 2
+      ;;
+    --stem)
+      STEM="$2"
+      shift 2
+      ;;
+    --test-type)
+      TEST_TYPE="$2"
+      shift 2
+      ;;
+    --max-test-tracks)
+      MAX_TEST_TRACKS="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      echo "Usage: sbatch configs/turing.sh [--train-config <path>] [--stem <vocals|drums|bass|other>] [--test-type <quick|full|none>] [--max-test-tracks <N>]"
+      exit 1
+      ;;
+  esac
+done
+
 # Move to submission directory (where sbatch was run).
 cd "${SLURM_SUBMIT_DIR}"
 
@@ -74,9 +108,6 @@ print("musdb version:", getattr(musdb, "__version__", "unknown"))
 print("lightning version:", getattr(lightning, "__version__", "unknown"))
 PY
 
-STEM="vocals"
-OUT_DIR="runs/moises_light"
-TRAIN_CONFIG="configs/vocals_short.yaml"
 export TRAIN_CONFIG
 
 if [ ! -f "${TRAIN_CONFIG}" ]; then
@@ -93,21 +124,40 @@ if abs(float(cfg.segment_seconds) - 7.0) > 1e-9:
 print("Config check passed: using 7-second segments.")
 PY
 
-# ---- Training on academic partition (single GPU) ----
+CFG_BASENAME="$(basename "${TRAIN_CONFIG}" .yaml)"
+RUN_STAMP="$(date +%m-%d_%H-%M)"
+OUT_DIR="runs/${CFG_BASENAME}_${RUN_STAMP}"
+
 TRAIN_ARGS=(
   --config "${TRAIN_CONFIG}"
   --target-stem "${STEM}"
   --out-dir "${OUT_DIR}"
 )
 
-python scripts/train.py \
-  "${TRAIN_ARGS[@]}"
+python scripts/train.py "${TRAIN_ARGS[@]}"
 
-# ---- One-track validation after training ----
-python scripts/validate.py \
-  --config "${TRAIN_CONFIG}" \
-  --ckpt "${OUT_DIR}/${STEM}/best_legacy.pt" \
-  --subset test \
-  --track-index 0 \
-  --save-audio "${OUT_DIR}/${STEM}/validation_estimate.wav" \
-  --save-originals
+# ---- Testing after training ----
+if [[ "${TEST_TYPE}" != "none" ]]; then
+  if [[ -n "${MAX_TEST_TRACKS}" ]]; then
+    TEST_TRACK_ARG=(--max-tracks "${MAX_TEST_TRACKS}")
+  else
+    case "${TEST_TYPE}" in
+      quick)
+        TEST_TRACK_ARG=(--max-tracks 5)
+        ;;
+      full)
+        TEST_TRACK_ARG=()
+        ;;
+      *)
+        echo "Invalid --test-type '${TEST_TYPE}'. Expected: quick|full|none"
+        exit 1
+        ;;
+    esac
+  fi
+
+  python scripts/test.py \
+    --config "${TRAIN_CONFIG}" \
+    --ckpt "${OUT_DIR}/${STEM}/best_legacy.pt" \
+    "${TEST_TRACK_ARG[@]}" \
+    --save-json "${OUT_DIR}/${STEM}/test_report.json"
+fi
