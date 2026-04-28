@@ -71,6 +71,19 @@ To limit epoch size for quick tests, cap sample counts:
 python scripts/train_lightning.py --download-preview --target-stem vocals --max-train-samples 10 --max-val-samples 5
 ```
 
+Preset configs:
+
+```bash
+# quick sanity run (preview clips, tiny sample caps)
+python scripts/train_lightning.py --config configs/vocals_short.yaml
+
+# medium run (full MUSDB, capped epoch size)
+python scripts/train_lightning.py --config configs/vocals_medium.yaml
+
+# long run (full MUSDB, uncapped sample counts)
+python scripts/train_lightning.py --config configs/vocals_long.yaml
+```
+
 ### Recommended commands
 
 Smoke test on Mac (M3/MPS, quick pipeline validation):

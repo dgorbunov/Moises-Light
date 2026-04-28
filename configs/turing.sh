@@ -4,7 +4,7 @@
 #SBATCH --mem=64g
 #SBATCH --job-name="moises_light_vocals"
 #SBATCH --partition=academic
-#SBATCH --time=0-12:00:00
+#SBATCH --time=0-20:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
@@ -78,7 +78,6 @@ STEM="vocals"
 OUT_DIR="runs/moises_light"
 TRAIN_CONFIG="configs/vocals.yaml"
 
-# Preview mode only: use musdb package 7-second preview clips.
 if [ ! -f "${TRAIN_CONFIG}" ]; then
   echo "Missing training config: ${TRAIN_CONFIG}"
   exit 1
@@ -95,7 +94,6 @@ PY
 # ---- Training on academic partition (single GPU) ----
 TRAIN_ARGS=(
   --config "${TRAIN_CONFIG}"
-  --download-preview
   --target-stem "${STEM}"
   --out-dir "${OUT_DIR}"
 )

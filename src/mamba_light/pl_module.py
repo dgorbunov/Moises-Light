@@ -61,6 +61,12 @@ class MoisesLightningModule(L.LightningModule):
         pred_spec = self.model(mix_spec)
         loss = self.loss_fn(pred_spec, tgt_spec, tgt_wav=target)
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        interval = max(1, int(self.cfg.trainer.log_every_n_steps))
+        if (batch_idx + 1) % interval == 0:
+            # Emit newline-based logs for train steps (helpful in SLURM logs).
+            self.print(
+                f"train_step={self.global_step} batch_idx={batch_idx} loss={float(loss.detach().cpu()):.6f}"
+            )
         return loss
 
     def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
