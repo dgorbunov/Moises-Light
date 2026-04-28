@@ -47,11 +47,12 @@ def _load_track_audio(
     except Exception as e:
         raise RuntimeError("musdb package is required for validation script.") from e
 
+    musdb_subset = "train" if subset == "train" else "test"
     root = Path(cfg.musdb_root).expanduser()
     db_kwargs: dict[str, object] = {"root": str(root)}
-    is_wav = looks_like_wav_layout(root, subset=subset)
+    # "val" is a logical split of MUSDB test tracks; filesystem subset is "test".
+    is_wav = looks_like_wav_layout(root, subset=musdb_subset)
 
-    musdb_subset = "train" if subset == "train" else "test"
     db = musdb.DB(subsets=musdb_subset, is_wav=is_wav, **db_kwargs)
     tracks = list(db.tracks)
     if subset == "val":
@@ -95,8 +96,8 @@ def main() -> None:
         sample_rate=cfg.sample_rate,
         device=device,
     )
-    csdr_model = chunk_level_sdr(ref, est, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
-    csdr_mix = chunk_level_sdr(ref, mix, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
+    sisdr_model = chunk_level_sdr(ref, est, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
+    sisdr_mix = chunk_level_sdr(ref, mix, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
 
     est_rms = float(torch.sqrt(torch.mean(est**2)).item())
     ref_rms = float(torch.sqrt(torch.mean(ref**2)).item())
@@ -121,10 +122,10 @@ def main() -> None:
         "target_stem": cfg.target_stem,
         "subset": args.subset,
         "track_index": args.track_index,
-        "song_median_cSDR": float(csdr_model.song_median_sdr),
-        "song_median_cSDR_mixture_baseline": float(csdr_mix.song_median_sdr),
-        "song_median_cSDR_delta_vs_mixture": float(csdr_model.song_median_sdr - csdr_mix.song_median_sdr),
-        "n_chunks": int(csdr_model.n_chunks),
+        "song_median_siSDR": float(sisdr_model.song_median_sdr),
+        "song_median_siSDR_mixture_baseline": float(sisdr_mix.song_median_sdr),
+        "song_median_siSDR_delta_vs_mixture": float(sisdr_model.song_median_sdr - sisdr_mix.song_median_sdr),
+        "n_chunks": int(sisdr_model.n_chunks),
         "estimate_rms": est_rms,
         "reference_rms": ref_rms,
         "mixture_rms": mix_rms,

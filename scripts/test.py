@@ -34,17 +34,17 @@ def _eval_track(model: torch.nn.Module, stft_params: STFTParams, cfg: TrainConfi
     mix = torch.from_numpy(tr.audio.T).float()
     ref = torch.from_numpy(tr.targets[cfg.target_stem].audio.T).float()
     est = separate_track(model=model, mixture=mix, stft_params=stft_params, segment_seconds=cfg.segment_seconds, overlap=cfg.eval_overlap, sample_rate=cfg.sample_rate, device=device)
-    csdr_model = chunk_level_sdr(ref, est, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
-    csdr_mix = chunk_level_sdr(ref, mix, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
+    sisdr_model = chunk_level_sdr(ref, est, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
+    sisdr_mix = chunk_level_sdr(ref, mix, sample_rate=cfg.sample_rate, chunk_seconds=1.0)
     est_rms = float(torch.sqrt(torch.mean(est**2)).item())
     ref_rms = float(torch.sqrt(torch.mean(ref**2)).item())
     mix_rms = float(torch.sqrt(torch.mean(mix**2)).item())
     return {
         "track_name": str(tr.name),
-        "song_median_cSDR": float(csdr_model.song_median_sdr),
-        "song_median_cSDR_mixture_baseline": float(csdr_mix.song_median_sdr),
-        "song_median_cSDR_delta_vs_mixture": float(csdr_model.song_median_sdr - csdr_mix.song_median_sdr),
-        "n_chunks": int(csdr_model.n_chunks),
+        "song_median_siSDR": float(sisdr_model.song_median_sdr),
+        "song_median_siSDR_mixture_baseline": float(sisdr_mix.song_median_sdr),
+        "song_median_siSDR_delta_vs_mixture": float(sisdr_model.song_median_sdr - sisdr_mix.song_median_sdr),
+        "n_chunks": int(sisdr_model.n_chunks),
         "estimate_rms": est_rms,
         "reference_rms": ref_rms,
         "mixture_rms": mix_rms,
@@ -73,18 +73,18 @@ def main() -> None:
     stft_params = STFTParams(n_fft=cfg.stft.n_fft, hop_length=cfg.stft.hop_length, win_length=cfg.stft.win_length, freq_bins=cfg.stft.freq_bins)
     per_track = [_eval_track(model=model, stft_params=stft_params, cfg=cfg, tr=tr, device=device) for tr in tracks]
 
-    csdr_vals = np.asarray([r["song_median_cSDR"] for r in per_track], dtype=np.float64)
-    mix_vals = np.asarray([r["song_median_cSDR_mixture_baseline"] for r in per_track], dtype=np.float64)
-    delta_vals = np.asarray([r["song_median_cSDR_delta_vs_mixture"] for r in per_track], dtype=np.float64)
+    sisdr_vals = np.asarray([r["song_median_siSDR"] for r in per_track], dtype=np.float64)
+    mix_vals = np.asarray([r["song_median_siSDR_mixture_baseline"] for r in per_track], dtype=np.float64)
+    delta_vals = np.asarray([r["song_median_siSDR_delta_vs_mixture"] for r in per_track], dtype=np.float64)
     ratio_vals = np.asarray([r["estimate_to_reference_rms_ratio"] for r in per_track], dtype=np.float64)
     summary = {
         "target_stem": cfg.target_stem,
         "n_tracks": int(len(per_track)),
-        "cSDR_median_over_songs": float(np.median(csdr_vals)),
-        "cSDR_mean_over_songs": float(np.mean(csdr_vals)),
-        "mixture_cSDR_median_over_songs": float(np.median(mix_vals)),
-        "delta_cSDR_median_over_songs": float(np.median(delta_vals)),
-        "delta_cSDR_mean_over_songs": float(np.mean(delta_vals)),
+        "siSDR_median_over_songs": float(np.median(sisdr_vals)),
+        "siSDR_mean_over_songs": float(np.mean(sisdr_vals)),
+        "mixture_siSDR_median_over_songs": float(np.median(mix_vals)),
+        "delta_siSDR_median_over_songs": float(np.median(delta_vals)),
+        "delta_siSDR_mean_over_songs": float(np.mean(delta_vals)),
         "estimate_to_reference_rms_ratio_median": float(np.median(ratio_vals)),
         "estimate_to_reference_rms_ratio_p10": float(np.percentile(ratio_vals, 10)),
         "estimate_to_reference_rms_ratio_p90": float(np.percentile(ratio_vals, 90)),

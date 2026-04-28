@@ -7,6 +7,5 @@ soundfile
 tqdm
 pyyaml
 einops
-mir_eval
 stempeg
 musdb

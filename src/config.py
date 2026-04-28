@@ -48,6 +48,7 @@ class TrainConfig:
     lr_patience_epochs: int = 20
     lr_factor: float = 0.9
     early_stop_patience_epochs: int = 50
+    metrics_every_n_epochs: int = 5
 
     seed: int = 1337
 

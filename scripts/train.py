@@ -24,7 +24,7 @@ from module import MoisesModule
 class DebugMetricsCallback(Callback):
     def __init__(self) -> None:
         super().__init__()
-        self.history: dict[str, list[float]] = {"val_cSDR": [], "val_cSDR_mix": [], "val_cSDR_delta": [], "val_loss": []}
+        self.history: dict[str, list[float]] = {"val_siSDR": [], "val_siSDR_mix": [], "val_siSDR_delta": [], "val_loss": []}
 
     def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         del pl_module
@@ -144,10 +144,11 @@ def main() -> None:
     debug_cb = DebugMetricsCallback()
     ckpt_cb = ModelCheckpoint(
         dirpath=str(run_dir / "checkpoints"),
-        filename="best-{epoch:03d}-{val_cSDR:.3f}-{val_loss:.4f}",
-        monitor="val_cSDR",
+        filename="best-{epoch:03d}-{val_siSDR:.3f}-{val_loss:.4f}",
+        monitor="val_siSDR",
         mode="max",
         save_top_k=1,
+        every_n_epochs=max(1, int(cfg.metrics_every_n_epochs)),
         save_last=True,
     )
     early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=cfg.early_stop_patience_epochs)

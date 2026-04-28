@@ -8,12 +8,13 @@ segment_seconds: 7.0
 train_overlap: 0.75
 eval_overlap: 0.50
 
-batch_size: 16
+batch_size: 24
 num_workers: 12
 lr: 0.0002
 lr_patience_epochs: 10
 lr_factor: 0.9
 early_stop_patience_epochs: 25
+metrics_every_n_epochs: 5
 debug: false
 debug_num_tracks: 2
 debug_epochs: 10
