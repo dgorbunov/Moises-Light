@@ -30,19 +30,16 @@ sacct -j <JOB_ID> --format=JobID,JobName,State,ExitCode,Elapsed,NodeList,Reason
 
 ```bash
 # live output log
-watch -n 2 "tail -n 80 logs/moises_light_vocals_<JOB_ID>.out"
+tail -f logs/moises_light_vocals_<JOB_ID>.out
 
 # live error log
-watch -n 2 "tail -n 80 logs/moises_light_vocals_<JOB_ID>.err"
-
-# if you only need one stream, use plain tail -f
-tail -f logs/moises_light_vocals_<JOB_ID>.out
+tail -f logs/moises_light_vocals_<JOB_ID>.err
 ```
 
-## Monitor GPU Usage
+## GPU Profiling
 
 ```bash
-# run while job is active on allocated node
-watch -n 2 nvidia-smi
+# run while job is active
+watch -n0.1 srun --jobid=<JOB_ID> nvidia-smi
 ```
 

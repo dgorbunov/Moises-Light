@@ -1,6 +1,6 @@
 musdb_root: "~/musdb18hq"
-max_train_samples: 2000
-max_val_samples: 50
+max_train_samples: 800
+max_val_samples: 20
 target_stem: "vocals"
 
 sample_rate: 44100
@@ -8,8 +8,8 @@ segment_seconds: 7.0
 train_overlap: 0.75
 eval_overlap: 0.50
 
-batch_size: 12
-num_workers: 8
+batch_size: 16
+num_workers: 12
 lr: 0.0002
 lr_patience_epochs: 10
 lr_factor: 0.9
@@ -40,8 +40,8 @@ trainer:
   accelerator: "gpu"
   devices: 1
   strategy: "auto"
-  precision: "32-true"
-  max_epochs: 60
+  precision: "16-mixed"
+  max_epochs: 50
   log_every_n_steps: 10
   deterministic: false
 
