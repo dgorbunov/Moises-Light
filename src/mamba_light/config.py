@@ -33,8 +33,7 @@ class STFTConfig:
 
 @dataclass(frozen=True)
 class TrainConfig:
-    musdb_root: str
-    download_preview: bool = False
+    musdb_root: str = "~/musdb18hq"
     max_train_samples: int = 0
     max_val_samples: int = 0
     sample_rate: int = 44100

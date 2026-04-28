@@ -75,6 +75,8 @@ class MoisesLightningModule(L.LightningModule):
         mix_spec = target_spectrogram(mixture, self.stft_params)
         pred_spec = self.model(mix_spec)
         val_loss = torch.mean(torch.abs(pred_spec - tgt_spec))
+        # Log both names for readability and checkpoint compatibility.
+        self.log("val_loss", val_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("val/loss", val_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
         with torch.no_grad():

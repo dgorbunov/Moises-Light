@@ -19,6 +19,18 @@ from mamba_light.metrics import chunk_level_sdr
 from mamba_light.stft import STFTParams
 
 
+def _looks_like_wav_layout(root: Path) -> bool:
+    train_dir = root / "train"
+    if not train_dir.exists():
+        train_dir = root / "MUSDB18" / "train"
+    if not train_dir.exists():
+        return False
+    for track_dir in sorted([p for p in train_dir.iterdir() if p.is_dir()])[:5]:
+        if (track_dir / "mixture.wav").exists():
+            return True
+    return False
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Run one-track inference sanity check using a trained checkpoint and MUSDB track."
@@ -27,7 +39,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--ckpt", type=str, required=True, help="Checkpoint path (e.g., best_legacy.pt)")
     p.add_argument("--subset", type=str, default="test", choices=("train", "test"), help="MUSDB subset to sample from")
     p.add_argument("--track-index", type=int, default=0, help="Track index within selected subset")
-    p.add_argument("--download-preview", action="store_true", help="Use musdb preview clips download")
     p.add_argument("--save-audio", type=str, default="", help="Optional output wav path for separated estimate")
     p.add_argument(
         "--save-originals",
@@ -41,28 +52,17 @@ def _load_track_audio(
     cfg: TrainConfig,
     subset: str,
     track_index: int,
-    download_preview: bool,
 ) -> tuple[str, torch.Tensor, torch.Tensor]:
     try:
         import musdb
     except Exception as e:
         raise RuntimeError("musdb package is required for validation script.") from e
 
-    db_kwargs: dict[str, object] = {}
-    if download_preview:
-        if cfg.musdb_root and cfg.musdb_root != "/path/to/musdb18hq":
-            preview_root = Path(cfg.musdb_root)
-        else:
-            preview_root = Path.cwd() / ".cache" / "musdb_preview"
-        preview_root.mkdir(parents=True, exist_ok=True)
-        db_kwargs["download"] = True
-        db_kwargs["root"] = str(preview_root)
-    else:
-        if not cfg.musdb_root or cfg.musdb_root == "/path/to/musdb18hq":
-            raise ValueError("Provide a real musdb_root in config when not using --download-preview.")
-        db_kwargs["root"] = cfg.musdb_root
+    root = Path(cfg.musdb_root).expanduser()
+    db_kwargs: dict[str, object] = {"root": str(root)}
+    is_wav = _looks_like_wav_layout(root)
 
-    db = musdb.DB(subsets=subset, is_wav=not download_preview, **db_kwargs)
+    db = musdb.DB(subsets=subset, is_wav=is_wav, **db_kwargs)
     tracks = list(db.tracks)
     if not tracks:
         raise RuntimeError(f"No tracks found for subset='{subset}'.")
@@ -91,7 +91,6 @@ def main() -> None:
         cfg=cfg,
         subset=args.subset,
         track_index=args.track_index,
-        download_preview=args.download_preview,
     )
     est = separate_track(
         model=model,

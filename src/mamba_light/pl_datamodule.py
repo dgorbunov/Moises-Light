@@ -86,7 +86,6 @@ class MusdbLightningDataModule(L.LightningDataModule):
         self,
         musdb_root: str,
         target_stem: str,
-        download_preview: bool = False,
         sample_rate: int = 44100,
         segment_seconds: float = 7.0,
         batch_size: int = 2,
@@ -100,7 +99,6 @@ class MusdbLightningDataModule(L.LightningDataModule):
         super().__init__()
         self.musdb_root = musdb_root
         self.target_stem = target_stem
-        self.download_preview = bool(download_preview)
         self.sample_rate = sample_rate
         self.segment_seconds = float(segment_seconds)
         self.batch_size = batch_size
@@ -123,28 +121,16 @@ class MusdbLightningDataModule(L.LightningDataModule):
                 "Install with `pip install musdb`."
             ) from e
 
-        if self.download_preview:
-            # musdb can download short 7-second preview excerpts for quick experiments.
-            # Always pass an explicit writable root to avoid accidental MUSDB_PATH hijacking.
-            if self.musdb_root and self.musdb_root != "/path/to/musdb18hq":
-                preview_root = Path(self.musdb_root)
-            else:
-                preview_root = Path.cwd() / ".cache" / "musdb_preview"
-            preview_root.mkdir(parents=True, exist_ok=True)
-            db_kwargs: dict[str, object] = {"download": True, "root": str(preview_root)}
-            train_db = musdb.DB(subsets="train", split="train", **db_kwargs)
-            val_db = musdb.DB(subsets="test", **db_kwargs)
-        else:
-            root = Path(self.musdb_root)
-            is_wav = _looks_like_wav_layout(root)
-            if not is_wav:
-                warnings.warn(
-                    "WAV MUSDB layout not detected. Falling back to STEM decoding (is_wav=False), "
-                    "which is slower and requires ffmpeg/stempeg.",
-                    stacklevel=2,
-                )
-            train_db = musdb.DB(root=str(root), subsets="train", split="train", is_wav=is_wav)
-            val_db = musdb.DB(root=str(root), subsets="test", is_wav=is_wav)
+        root = Path(self.musdb_root).expanduser()
+        is_wav = _looks_like_wav_layout(root)
+        if not is_wav:
+            warnings.warn(
+                "WAV MUSDB layout not detected. Falling back to STEM decoding (is_wav=False), "
+                "which is slower and requires ffmpeg/stempeg.",
+                stacklevel=2,
+            )
+        train_db = musdb.DB(root=str(root), subsets="train", split="train", is_wav=is_wav)
+        val_db = musdb.DB(root=str(root), subsets="test", is_wav=is_wav)
 
         train_tracks = list(train_db.tracks)
         val_tracks = list(val_db.tracks)

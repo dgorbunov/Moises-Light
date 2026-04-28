@@ -1,5 +1,4 @@
 musdb_root: "~/musdb18hq"
-download_preview: false 
 max_train_samples: 100
 max_val_samples: 20
 target_stem: "vocals"

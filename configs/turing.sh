@@ -77,6 +77,7 @@ PY
 STEM="vocals"
 OUT_DIR="runs/moises_light"
 TRAIN_CONFIG="configs/vocals_short.yaml"
+export TRAIN_CONFIG
 
 if [ ! -f "${TRAIN_CONFIG}" ]; then
   echo "Missing training config: ${TRAIN_CONFIG}"
@@ -84,8 +85,9 @@ if [ ! -f "${TRAIN_CONFIG}" ]; then
 fi
 
 python - <<'PY'
+import os
 from mamba_light.config import load_config
-cfg = load_config("configs/vocals.yaml")
+cfg = load_config(os.environ["TRAIN_CONFIG"])
 if abs(float(cfg.segment_seconds) - 7.0) > 1e-9:
     raise SystemExit(f"Expected segment_seconds=7.0, got {cfg.segment_seconds}")
 print("Config check passed: using 7-second segments.")
@@ -105,7 +107,6 @@ python scripts/train_lightning.py \
 python scripts/validate_checkpoint.py \
   --config "${TRAIN_CONFIG}" \
   --ckpt "${OUT_DIR}/${STEM}/best_legacy.pt" \
-  --download-preview \
   --subset test \
   --track-index 0 \
   --save-audio "${OUT_DIR}/${STEM}/validation_estimate.wav" \

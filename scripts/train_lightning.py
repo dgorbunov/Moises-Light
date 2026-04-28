@@ -40,7 +40,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--musdb-root", type=str, default="", help="MUSDB18 root folder")
     p.add_argument("--target-stem", type=str, default="", help="vocals|drums|bass|other")
     p.add_argument("--out-dir", type=str, default="", help="output dir for checkpoints/logs")
-    p.add_argument("--download-preview", action="store_true", help="Use musdb 7-second preview download")
     p.add_argument("--max-train-samples", type=int, default=-1, help="Cap number of train samples per epoch")
     p.add_argument("--max-val-samples", type=int, default=-1, help="Cap number of validation samples per epoch")
     p.add_argument("--debug", action="store_true", help="Enable debug mode (2 tracks, 10 epochs)")
@@ -52,16 +51,12 @@ def _build_cfg(args: argparse.Namespace) -> TrainConfig:
     if args.config:
         cfg = load_config(args.config)
     else:
-        if not args.musdb_root and not args.download_preview:
-            raise SystemExit("Provide --config or --musdb-root")
-        cfg = TrainConfig(musdb_root=args.musdb_root or "", download_preview=args.download_preview)
+        cfg = TrainConfig(musdb_root=args.musdb_root or "~/musdb18hq")
 
     if args.target_stem:
         cfg = TrainConfig(**{**cfg.__dict__, "target_stem": args.target_stem})
     if args.out_dir:
         cfg = TrainConfig(**{**cfg.__dict__, "out_dir": args.out_dir})
-    if args.download_preview and not cfg.download_preview:
-        cfg = TrainConfig(**{**cfg.__dict__, "download_preview": True})
     if args.max_train_samples >= 0:
         cfg = TrainConfig(**{**cfg.__dict__, "max_train_samples": args.max_train_samples})
     if args.max_val_samples >= 0:
@@ -202,7 +197,6 @@ def main() -> None:
     datamodule = MusdbLightningDataModule(
         musdb_root=cfg.musdb_root,
         target_stem=cfg.target_stem,
-        download_preview=cfg.download_preview,
         sample_rate=cfg.sample_rate,
         segment_seconds=cfg.segment_seconds,
         batch_size=cfg.batch_size,
