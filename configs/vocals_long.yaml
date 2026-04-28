@@ -1,4 +1,4 @@
-musdb_root: "/path/to/musdb18hq"
+musdb_root: "~/musdb18hq"
 download_preview: false
 max_train_samples: 0
 max_val_samples: 0
