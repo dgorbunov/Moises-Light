@@ -8,7 +8,7 @@ segment_seconds: 7.0
 train_overlap: 0.75
 eval_overlap: 0.50
 
-batch_size: 24
+batch_size: 8
 num_workers: 12
 lr: 0.0002
 lr_patience_epochs: 20
