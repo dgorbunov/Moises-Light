@@ -1,6 +1,8 @@
 # Mamba-Light
 WPI CS 541 Final Project
 
+Authors: Daniel Gorbunov, Daniel Zhang
+
 ## Baseline: Moises-Light reproduction (MUSDB18-HQ)
 
 This repo contains a runnable baseline inspired by **“Moises-Light: Resource-efficient Band-split U-Net For Music Source Separation” (arXiv:2510.06785v1)**.
@@ -15,7 +17,7 @@ pip install -e .
 ```
 
 ### Dataset
-- Default dataset root in configs: `~/musdb18hq` (expanded automatically)
+- Download dataset to `~/musdb18hq`
 - Split behavior (deterministic by track name):
   - Train: all tracks in `train/`
   - Validation: first half of tracks in `test/`
@@ -43,13 +45,13 @@ python scripts/train.py --config configs/vocals_medium.yaml
 python scripts/train.py --config configs/vocals_long.yaml
 ```
 
-### Optional: Validate One Track
+### Validate One Track
 
 ```bash
-python scripts/validate.py --config configs/vocals_short.yaml --ckpt runs/moises_light/vocals/best_legacy.pt --subset val --track-index 0 --save-audio runs/moises_light/vocals/validation_estimate.wav --save-originals
+python scripts/validate.py --run-dir runs/{RUN_NAME} --subset val --track-index 0 --save-originals
 ```
 
-### Optional: Analyze Chunk Energy
+### Analyze Chunk Energy
 
 ```bash
 python scripts/analyze_chunk_energy.py --config configs/vocals_long.yaml --samples 2000

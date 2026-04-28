@@ -165,6 +165,7 @@ def main() -> None:
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         deterministic=cfg.trainer.deterministic,
         enable_progress_bar=True,
+        gradient_clip_val=1.0,
     )
     trainer.fit(model=module, datamodule=datamodule, ckpt_path=args.resume or None)
     _export_legacy_checkpoint(trainer=trainer, cfg=cfg, run_dir=run_dir)

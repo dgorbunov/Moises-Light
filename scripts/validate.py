@@ -13,7 +13,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from audio_io import save_audio
-from config import TrainConfig, load_config
+from config import MultiResSTFTConfig, STFTConfig, TrainConfig, TrainerConfig
 from dataset_utils import looks_like_wav_layout, split_test_tracks
 from infer import load_model_from_ckpt, separate_track
 from metrics import chunk_level_sdr
@@ -24,8 +24,12 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Run one-track inference sanity check using a trained checkpoint and MUSDB track."
     )
-    p.add_argument("--config", type=str, required=True, help="Train/eval config YAML path")
-    p.add_argument("--ckpt", type=str, required=True, help="Checkpoint path (e.g., best_legacy.pt)")
+    p.add_argument(
+        "--run-dir",
+        type=str,
+        default="",
+        help="Top-level run directory, or stem run directory containing config.json and best_legacy.pt",
+    )
     p.add_argument("--subset", type=str, default="val", choices=("train", "val", "test"), help="MUSDB subset to sample from")
     p.add_argument("--track-index", type=int, default=0, help="Track index within selected subset")
     p.add_argument("--save-audio", type=str, default="", help="Optional output wav path for separated estimate")
@@ -35,6 +39,55 @@ def _parse_args() -> argparse.Namespace:
         help="When set with --save-audio, also save original mixture and reference stem wav files.",
     )
     return p.parse_args()
+
+
+def _load_train_config_from_json(path: Path) -> TrainConfig:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if "stft" in data and isinstance(data["stft"], dict):
+        data["stft"] = STFTConfig(**data["stft"])
+    if "multires" in data and isinstance(data["multires"], dict):
+        data["multires"] = MultiResSTFTConfig(**data["multires"])
+    if "trainer" in data and isinstance(data["trainer"], dict):
+        data["trainer"] = TrainerConfig(**data["trainer"])
+    return TrainConfig(**data)
+
+
+def _resolve_stem_run_dir(run_dir: Path) -> Path:
+    config_path = run_dir / "config.json"
+    ckpt_path = run_dir / "best_legacy.pt"
+    if config_path.exists() and ckpt_path.exists():
+        return run_dir
+
+    candidates = []
+    for child in run_dir.iterdir():
+        if not child.is_dir():
+            continue
+        has_config = (child / "config.json").exists()
+        has_ckpt = (child / "best_legacy.pt").exists()
+        if has_config and has_ckpt:
+            candidates.append(child)
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        names = ", ".join(sorted(c.name for c in candidates))
+        raise RuntimeError(
+            f"Multiple stem run directories found under '{run_dir}': {names}. "
+            "Pass the specific stem directory to --run-dir."
+        )
+    raise RuntimeError(
+        f"Could not find run artifacts under '{run_dir}'. Expected config.json and best_legacy.pt either "
+        "directly in this directory or in exactly one child directory."
+    )
+
+
+def _resolve_runtime_inputs(args: argparse.Namespace) -> tuple[TrainConfig, Path, Path]:
+    if not args.run_dir:
+        raise RuntimeError("Pass --run-dir with a top-level or stem run directory.")
+    stem_run_dir = _resolve_stem_run_dir(Path(args.run_dir).expanduser())
+    cfg = _load_train_config_from_json(stem_run_dir / "config.json")
+    ckpt_path = stem_run_dir / "best_legacy.pt"
+    return cfg, ckpt_path, stem_run_dir
 
 
 def _load_track_audio(
@@ -71,10 +124,10 @@ def _load_track_audio(
 
 def main() -> None:
     args = _parse_args()
-    cfg = load_config(args.config)
+    cfg, ckpt_path, stem_run_dir = _resolve_runtime_inputs(args)
 
     device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
-    model = load_model_from_ckpt(args.ckpt, device=device)
+    model = load_model_from_ckpt(str(ckpt_path), device=device)
     stft_params = STFTParams(
         n_fft=cfg.stft.n_fft,
         hop_length=cfg.stft.hop_length,
@@ -104,8 +157,13 @@ def main() -> None:
     mix_rms = float(torch.sqrt(torch.mean(mix**2)).item())
 
     saved_files: dict[str, str] = {}
+    out_est: Path | None = None
     if args.save_audio:
         out_est = Path(args.save_audio)
+    elif args.run_dir:
+        out_est = stem_run_dir / "validation_estimate.wav"
+
+    if out_est is not None:
         save_audio(out_est, est, sample_rate=cfg.sample_rate)
         saved_files["estimate"] = str(out_est)
 
@@ -130,7 +188,7 @@ def main() -> None:
         "reference_rms": ref_rms,
         "mixture_rms": mix_rms,
         "estimate_to_reference_rms_ratio": float(est_rms / max(ref_rms, 1e-12)),
-        "checkpoint": str(args.ckpt),
+        "checkpoint": str(ckpt_path),
         "saved_files": saved_files,
     }
     print(json.dumps(result, indent=2))
