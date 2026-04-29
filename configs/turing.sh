@@ -68,8 +68,7 @@ mkdir -p logs
 # mamba-ssm CUDA extensions (~15 min) on every submission. Bump MARKER_CONTENT
 # whenever requirements.txt or the torch version changes.
 VENV_MARKER=".venv/.installed_marker"
-MARKER_CONTENT="torch-2.8.0+mamba-ssm-prebuilt"
-TORCH_CUDA_INDEX=""
+MARKER_CONTENT="torch-cu129-uv-mamba-git-v11"
 
 rebuild_venv=false
 if [ ! -d ".venv" ] || [ ! -f "${VENV_MARKER}" ] || [ "$(cat "${VENV_MARKER}" 2>/dev/null)" != "${MARKER_CONTENT}" ]; then
@@ -79,54 +78,49 @@ fi
 if [ "${rebuild_venv}" = "true" ]; then
   echo "Building Python virtual environment (marker '${MARKER_CONTENT}' not found or stale)..."
   rm -rf .venv
-  python -m venv .venv
+
+  # Install uv if not already present (mirrors afrenkai/mamba-glibc-fix approach).
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "Installing uv..."
+    wget -qO- https://astral.sh/uv/install.sh | sh
+    export PATH="${HOME}/.local/bin:${PATH}"
+  fi
+
+  uv venv .venv
   source .venv/bin/activate
 
-  python -m pip install --upgrade pip
+  # torch from cu129 (no version pin) — uv has its own cache, avoiding the
+  # stale cu130 wheel that pip keeps reusing from ~/.cache/pip.
+  echo "Installing torch from cu129..."
+  uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu129
+  echo "Torch installed: $(python -c 'import torch; print(torch.__version__, "cuda:", torch.version.cuda)')"
 
-  # Prefer cu129 (for CUDA 12.9 module), fall back to cu128 if unavailable.
-  for cuda_tag in cu129 cu128; do
-    candidate_index="https://download.pytorch.org/whl/${cuda_tag}"
-    echo "Trying PyTorch index: ${candidate_index}"
-    if python -m pip install --index-url "${candidate_index}" torch==2.8.0 torchaudio==2.8.0; then
-      TORCH_CUDA_INDEX="${candidate_index}"
-      echo "Using PyTorch CUDA index: ${TORCH_CUDA_INDEX}"
-      break
-    fi
-  done
+  uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu129
+  uv pip install -e .
 
-  if [ -z "${TORCH_CUDA_INDEX}" ]; then
-    echo "Failed to install CUDA-enabled torch wheels (tried cu129 and cu128)."
-    exit 1
-  fi
+  # Build mamba-ssm from git (exact approach from afrenkai/mamba-glibc-fix).
+  export TORCH_CUDA_ARCH_LIST="8.0"
+  export LD_LIBRARY_PATH="$(python -c 'import torch, os; print(os.path.dirname(torch.__file__)+"/lib")'):${LD_LIBRARY_PATH:-}"
 
-  # Install all requirements except mamba packages (handled separately below).
-  python -m pip install -r requirements.txt --extra-index-url "${TORCH_CUDA_INDEX}"
-  python -m pip install -e .
+  MAMBA_BUILD_DIR="/tmp/mamba-ssm-build-$$"
+  git clone --depth 1 https://github.com/state-spaces/mamba.git "${MAMBA_BUILD_DIR}"
+  echo "Building mamba-ssm from git clone..."
+  # Non-editable install: copies into site-packages so the source dir can be removed.
+  MAX_JOBS=4 uv pip install --no-build-isolation --no-cache-dir "${MAMBA_BUILD_DIR}"
+  rm -rf "${MAMBA_BUILD_DIR}"
 
-  # Install mamba pre-built wheels matched to CUDA 12 + PyTorch 2.8 + cxx11 ABI TRUE + Python 3.13.
-  # These wheels are from the official GitHub releases and avoid any source compilation.
-  CAUSAL_CONV1D_WHL="https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu12torch2.8cxx11abiTRUE-cp313-cp313-linux_x86_64.whl"
-  MAMBA_SSM_WHL="https://github.com/state-spaces/mamba/releases/download/v2.3.1/mamba_ssm-2.3.1+cu12torch2.8cxx11abiTRUE-cp313-cp313-linux_x86_64.whl"
-
-  echo "Installing causal-conv1d pre-built wheel..."
-  python -m pip install "${CAUSAL_CONV1D_WHL}"
-  echo "Installing mamba-ssm pre-built wheel..."
-  python -m pip install "${MAMBA_SSM_WHL}"
-
-  # Verify the import works before writing the marker.
   if python -c "from mamba_ssm import Mamba; print('mamba-ssm import OK')"; then
     echo "${MARKER_CONTENT}" > "${VENV_MARKER}"
-    echo "mamba-ssm installed successfully — venv will be reused on future jobs."
+    echo "mamba-ssm built successfully — venv will be reused on future jobs."
   else
-    echo "WARNING: mamba-ssm installed but import still fails. Training will use pure-PyTorch fallback."
-    echo "${MARKER_CONTENT}-fallback" > "${VENV_MARKER}"
+    echo "WARNING: mamba-ssm CUDA kernels unavailable. Training uses pure-PyTorch Mamba fallback."
+    echo "${MARKER_CONTENT}" > "${VENV_MARKER}"
   fi
+
 else
   echo "Reusing existing .venv (marker: ${MARKER_CONTENT})"
   source .venv/bin/activate
 fi
-
 python - <<'PY'
 import torch
 import musdb
