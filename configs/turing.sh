@@ -68,7 +68,7 @@ mkdir -p logs
 # mamba-ssm CUDA extensions (~15 min) on every submission. Bump MARKER_CONTENT
 # whenever requirements.txt or the torch version changes.
 VENV_MARKER=".venv/.installed_marker"
-MARKER_CONTENT="torch-2.8.0+mamba-ssm-v2"
+MARKER_CONTENT="torch-2.8.0+mamba-ssm-prebuilt"
 TORCH_CUDA_INDEX=""
 
 rebuild_venv=false
@@ -104,20 +104,22 @@ if [ "${rebuild_venv}" = "true" ]; then
   python -m pip install -r requirements.txt --extra-index-url "${TORCH_CUDA_INDEX}"
   python -m pip install -e .
 
-  # Build mamba CUDA extensions against the currently installed PyTorch headers.
-  # --no-build-isolation prevents pip from creating an isolated build env, so
-  # the extension compiles against the exact PyTorch ABI already in this venv.
-  echo "Building causal-conv1d from source (--no-build-isolation)..."
-  python -m pip install "causal-conv1d>=1.4.0" --no-build-isolation
-  echo "Building mamba-ssm from source (--no-build-isolation)..."
-  python -m pip install mamba-ssm --no-build-isolation
+  # Install mamba pre-built wheels matched to CUDA 12 + PyTorch 2.8 + cxx11 ABI TRUE + Python 3.13.
+  # These wheels are from the official GitHub releases and avoid any source compilation.
+  CAUSAL_CONV1D_WHL="https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu12torch2.8cxx11abiTRUE-cp313-cp313-linux_x86_64.whl"
+  MAMBA_SSM_WHL="https://github.com/state-spaces/mamba/releases/download/v2.3.1/mamba_ssm-2.3.1+cu12torch2.8cxx11abiTRUE-cp313-cp313-linux_x86_64.whl"
+
+  echo "Installing causal-conv1d pre-built wheel..."
+  python -m pip install "${CAUSAL_CONV1D_WHL}"
+  echo "Installing mamba-ssm pre-built wheel..."
+  python -m pip install "${MAMBA_SSM_WHL}"
 
   # Verify the import works before writing the marker.
   if python -c "from mamba_ssm import Mamba; print('mamba-ssm import OK')"; then
     echo "${MARKER_CONTENT}" > "${VENV_MARKER}"
-    echo "mamba-ssm built successfully — venv will be reused on future jobs."
+    echo "mamba-ssm installed successfully — venv will be reused on future jobs."
   else
-    echo "WARNING: mamba-ssm built but import still fails. Training will use pure-PyTorch fallback."
+    echo "WARNING: mamba-ssm installed but import still fails. Training will use pure-PyTorch fallback."
     echo "${MARKER_CONTENT}-fallback" > "${VENV_MARKER}"
   fi
 else
