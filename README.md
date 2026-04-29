@@ -1,4 +1,4 @@
-# Mamba-Light
+# Moises-Light++
 WPI CS 541 Final Project
 
 Authors: Daniel Gorbunov, Daniel Zhang
