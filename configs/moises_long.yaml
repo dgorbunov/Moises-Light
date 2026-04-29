@@ -1,6 +1,6 @@
 musdb_root: "~/musdb18hq"
 max_train_samples: 0
-max_val_samples: 20
+max_val_samples: 25
 chunks_per_track: 8
 target_stem: "vocals"
 
@@ -12,10 +12,10 @@ eval_overlap: 0.50
 batch_size: 8
 num_workers: 12
 lr: 0.0002
-lr_patience_epochs: 10
+lr_patience_epochs: 20
 lr_factor: 0.9
-early_stop_patience_epochs: 25
-metrics_every_n_epochs: 5
+early_stop_patience_epochs: 50
+metrics_every_n_epochs: 10
 debug: false
 debug_num_tracks: 2
 debug_epochs: 10
@@ -25,7 +25,7 @@ stft:
   n_fft: 6144
   hop_length: 1024
   win_length: 6144
-  freq_bins: 3072
+  freq_bins: 2048
 multires:
   fft_sizes: [1024, 2048, 4096]
   hop_sizes: [256, 512, 1024]
@@ -37,16 +37,16 @@ nrope: 5
 nsplit_enc: 3
 nsplit_dec: 1
 latent_dim: 128
-use_weight_sharing: true
-use_mamba: true
+use_weight_sharing: false 
+use_mamba: false
 
 trainer:
   accelerator: "gpu"
   devices: 1
   strategy: "auto"
   precision: "bf16-mixed"
-  max_epochs: 50
-  log_every_n_steps: 10
+  max_epochs: 200
+  log_every_n_steps: 20
   deterministic: false
 
 out_dir: "runs/moises_light"
