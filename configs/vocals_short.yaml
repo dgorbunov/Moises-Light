@@ -25,7 +25,7 @@ stft:
   n_fft: 6144
   hop_length: 1024
   win_length: 6144
-  freq_bins: 2048
+  freq_bins: 3072
 multires:
   fft_sizes: [1024, 2048, 4096]
   hop_sizes: [256, 512, 1024]
@@ -37,6 +37,8 @@ nrope: 5
 nsplit_enc: 3
 nsplit_dec: 1
 latent_dim: 128
+use_weight_sharing: true
+use_mamba: true 
 
 trainer:
   accelerator: "gpu"

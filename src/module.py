@@ -23,7 +23,19 @@ class MoisesModule(L.LightningModule):
         self.stft_params = STFTParams(n_fft=cfg.stft.n_fft, hop_length=cfg.stft.hop_length, win_length=cfg.stft.win_length, freq_bins=cfg.stft.freq_bins)
         self.metrics_every_n_epochs = max(1, int(cfg.metrics_every_n_epochs))
         multires = MultiResParams(cfg.multires.fft_sizes, cfg.multires.hop_sizes, cfg.multires.win_lengths) if cfg.use_multires_loss else None
-        self.model = MoisesLight(audio_channels=2, nband=cfg.nband, g=cfg.g, nrope=cfg.nrope, nsplit_enc=cfg.nsplit_enc, nsplit_dec=cfg.nsplit_dec, depth=3, latent_dim=cfg.latent_dim, freq_bins=cfg.stft.freq_bins)
+        self.model = MoisesLight(
+            audio_channels=2,
+            nband=cfg.nband,
+            g=cfg.g,
+            nrope=cfg.nrope,
+            nsplit_enc=cfg.nsplit_enc,
+            nsplit_dec=cfg.nsplit_dec,
+            depth=3,
+            latent_dim=cfg.latent_dim,
+            freq_bins=cfg.stft.freq_bins,
+            use_weight_sharing=cfg.use_weight_sharing,
+            use_mamba=cfg.use_mamba,
+        )
         self.loss_fn = MoisesLoss(stft_params=self.stft_params, multires=multires)
         self.augment = JointAugment(sample_rate=cfg.sample_rate)
         self.val_sisdr_model: list[float] = []

@@ -85,6 +85,8 @@ def _export_legacy_checkpoint(trainer: L.Trainer, cfg: TrainConfig, run_dir: Pat
             "nsplit_dec": cfg.nsplit_dec,
             "depth": 3,
             "latent_dim": cfg.latent_dim,
+            "use_weight_sharing": cfg.use_weight_sharing,
+            "use_mamba": cfg.use_mamba,
             "target_stem": cfg.target_stem,
             "stft": asdict(cfg.stft),
             "sample_rate": cfg.sample_rate,

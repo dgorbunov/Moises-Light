@@ -64,35 +64,52 @@ fi
 mkdir -p logs
 
 # ---- Python environment setup ----
-# Rebuild venv each run for deterministic installs on cluster jobs.
-if [ -d ".venv" ]; then
-  rm -rf .venv
-fi
-python -m venv .venv
-source .venv/bin/activate
-
-python -m pip install --upgrade pip
-
-# Prefer cu129 (for CUDA 12.9 module), fall back to cu128 if unavailable.
+# The venv is reused across jobs when the marker matches to avoid recompiling
+# mamba-ssm CUDA extensions (~15 min) on every submission. Bump MARKER_CONTENT
+# whenever requirements.txt or the torch version changes.
+VENV_MARKER=".venv/.installed_marker"
+MARKER_CONTENT="torch-2.8.0+mamba-ssm"
 TORCH_CUDA_INDEX=""
-for cuda_tag in cu129 cu128; do
-  candidate_index="https://download.pytorch.org/whl/${cuda_tag}"
-  echo "Trying PyTorch index: ${candidate_index}"
-  if python -m pip install --index-url "${candidate_index}" torch==2.8.0 torchaudio==2.8.0; then
-    TORCH_CUDA_INDEX="${candidate_index}"
-    echo "Using PyTorch CUDA index: ${TORCH_CUDA_INDEX}"
-    break
-  fi
-done
 
-if [ -z "${TORCH_CUDA_INDEX}" ]; then
-  echo "Failed to install CUDA-enabled torch wheels (tried cu129 and cu128)."
-  exit 1
+rebuild_venv=false
+if [ ! -d ".venv" ] || [ ! -f "${VENV_MARKER}" ] || [ "$(cat "${VENV_MARKER}" 2>/dev/null)" != "${MARKER_CONTENT}" ]; then
+  rebuild_venv=true
 fi
 
-# Install remaining requirements (torch/torchaudio entries are already satisfied).
-python -m pip install -r requirements.txt --extra-index-url "${TORCH_CUDA_INDEX}"
-python -m pip install -e .
+if [ "${rebuild_venv}" = "true" ]; then
+  echo "Building Python virtual environment (marker '${MARKER_CONTENT}' not found or stale)..."
+  rm -rf .venv
+  python -m venv .venv
+  source .venv/bin/activate
+
+  python -m pip install --upgrade pip
+
+  # Prefer cu129 (for CUDA 12.9 module), fall back to cu128 if unavailable.
+  for cuda_tag in cu129 cu128; do
+    candidate_index="https://download.pytorch.org/whl/${cuda_tag}"
+    echo "Trying PyTorch index: ${candidate_index}"
+    if python -m pip install --index-url "${candidate_index}" torch==2.8.0 torchaudio==2.8.0; then
+      TORCH_CUDA_INDEX="${candidate_index}"
+      echo "Using PyTorch CUDA index: ${TORCH_CUDA_INDEX}"
+      break
+    fi
+  done
+
+  if [ -z "${TORCH_CUDA_INDEX}" ]; then
+    echo "Failed to install CUDA-enabled torch wheels (tried cu129 and cu128)."
+    exit 1
+  fi
+
+  # Install remaining requirements (torch/torchaudio entries are already satisfied).
+  python -m pip install -r requirements.txt --extra-index-url "${TORCH_CUDA_INDEX}"
+  python -m pip install -e .
+
+  # Write marker so subsequent jobs skip the install step.
+  echo "${MARKER_CONTENT}" > "${VENV_MARKER}"
+else
+  echo "Reusing existing .venv (marker: ${MARKER_CONTENT})"
+  source .venv/bin/activate
+fi
 
 python - <<'PY'
 import torch

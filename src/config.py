@@ -65,6 +65,8 @@ class TrainConfig:
     nsplit_enc: int = 3
     nsplit_dec: int = 1
     latent_dim: int = 128
+    use_weight_sharing: bool = False
+    use_mamba: bool = False
 
     out_dir: str = "runs/moises_light"
     trainer: TrainerConfig = TrainerConfig()
