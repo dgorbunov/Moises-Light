@@ -137,6 +137,7 @@ def main() -> None:
         num_workers=cfg.num_workers,
         debug=cfg.debug,
         debug_num_tracks=cfg.debug_num_tracks,
+        chunks_per_track=cfg.chunks_per_track,
         max_train_samples=cfg.max_train_samples,
         max_val_samples=cfg.max_val_samples,
     )

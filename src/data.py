@@ -12,12 +12,22 @@ from dataset_utils import looks_like_wav_layout, split_test_tracks
 
 
 class MusdbTrainChunkDataset(Dataset):
-    def __init__(self, tracks: list, target_stem: str, sample_rate: int, segment_seconds: float = 7.0, chunks_per_track: int = 8, max_samples: int = 0) -> None:
+    def __init__(
+        self,
+        tracks: list,
+        target_stem: str,
+        sample_rate: int,
+        segment_seconds: float = 7.0,
+        chunks_per_track: int = 100,
+        max_samples: int = 0,
+        min_target_rms_ratio: float = 0.15,
+    ) -> None:
         self.tracks = tracks
         self.target_stem = target_stem
         self.sample_rate = sample_rate
         self.segment_seconds = float(segment_seconds)
         self.chunks_per_track = int(chunks_per_track)
+        self.min_target_rms_ratio = float(min_target_rms_ratio)
         base_length = max(1, len(tracks) * self.chunks_per_track)
         self._length = min(base_length, max_samples) if max_samples and max_samples > 0 else base_length
 
@@ -28,8 +38,18 @@ class MusdbTrainChunkDataset(Dataset):
         track = self.tracks[idx % len(self.tracks)]
         track.chunk_duration = self.segment_seconds
         max_start = max(0.0, float(track.duration) - self.segment_seconds)
-        track.chunk_start = random.uniform(0.0, max_start) if max_start > 0.0 else 0.0
-        return torch.from_numpy(track.audio.T).float(), torch.from_numpy(track.targets[self.target_stem].audio.T).float()
+        # Retry up to 8 times to find a chunk where the target stem has enough
+        # energy relative to the mixture. Tracks with silent stems (e.g. house
+        # music with no vocals) are skipped so the model isn't trained on them.
+        for _ in range(8):
+            track.chunk_start = random.uniform(0.0, max_start) if max_start > 0.0 else 0.0
+            mixture = torch.from_numpy(track.audio.T).float()
+            target = torch.from_numpy(track.targets[self.target_stem].audio.T).float()
+            mix_rms = float(mixture.pow(2).mean().sqrt())
+            tgt_rms = float(target.pow(2).mean().sqrt())
+            if mix_rms < 1e-6 or tgt_rms / (mix_rms + 1e-9) >= self.min_target_rms_ratio:
+                return mixture, target
+        return mixture, target
 
 
 class MusdbValRandomChunkDataset(Dataset):

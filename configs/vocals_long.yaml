@@ -1,6 +1,7 @@
 musdb_root: "~/musdb18hq"
-max_train_samples: 800
+max_train_samples: 0
 max_val_samples: 25
+chunks_per_track: 8
 target_stem: "vocals"
 
 sample_rate: 44100

@@ -36,6 +36,7 @@ class TrainConfig:
     musdb_root: str = "~/musdb18hq"
     max_train_samples: int = 0
     max_val_samples: int = 0
+    chunks_per_track: int = 100
     sample_rate: int = 44100
     segment_seconds: float = 7.0
     train_overlap: float = 0.75
