@@ -69,7 +69,7 @@ def main() -> None:
         tracks = tracks[: args.max_tracks]
 
     device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
-    model = load_model_from_ckpt(args.ckpt, device=device)
+    model = load_model_from_ckpt(args.ckpt, device=device, cfg=cfg)
     stft_params = STFTParams(n_fft=cfg.stft.n_fft, hop_length=cfg.stft.hop_length, win_length=cfg.stft.win_length, freq_bins=cfg.stft.freq_bins)
     per_track = [_eval_track(model=model, stft_params=stft_params, cfg=cfg, tr=tr, device=device) for tr in tracks]
 

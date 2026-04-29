@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 
 from model import MoisesLight
 from overlap_add import overlap_add
 from stft import STFTParams, istft, stft
+
+if TYPE_CHECKING:
+    from config import TrainConfig
 
 
 @torch.no_grad()
@@ -39,20 +43,43 @@ def separate_track(
     return overlap_add(torch.stack(chunks, dim=0), hop=hop)[:, :t]
 
 
-def load_model_from_ckpt(ckpt_path: str | Path, device: torch.device) -> MoisesLight:
+def load_model_from_ckpt(ckpt_path: str | Path, device: torch.device, cfg: TrainConfig | None = None) -> MoisesLight:
     ckpt = torch.load(str(ckpt_path), map_location="cpu")
-    h = ckpt["hparams"]
-    model = MoisesLight(
-        audio_channels=2,
-        nband=h["nband"],
-        g=h["g"],
-        nrope=h["nrope"],
-        nsplit_enc=h["nsplit_enc"],
-        nsplit_dec=h["nsplit_dec"],
-        depth=h["depth"],
-        latent_dim=h.get("latent_dim", 128),
-        freq_bins=h.get("stft", {}).get("freq_bins", 2048),
-    )
-    model.load_state_dict(ckpt["model"])
+    if "hparams" in ckpt and "model" in ckpt:
+        # Exported lightweight inference checkpoint.
+        h = ckpt["hparams"]
+        model = MoisesLight(
+            audio_channels=2,
+            nband=h["nband"],
+            g=h["g"],
+            nrope=h["nrope"],
+            nsplit_enc=h["nsplit_enc"],
+            nsplit_dec=h["nsplit_dec"],
+            depth=h["depth"],
+            latent_dim=h.get("latent_dim", 128),
+            freq_bins=h.get("stft", {}).get("freq_bins", 2048),
+        )
+        model.load_state_dict(ckpt["model"])
+    elif "state_dict" in ckpt:
+        # Lightning trainer checkpoint (.ckpt) available mid-training.
+        if cfg is None:
+            raise RuntimeError("Loading Lightning .ckpt requires cfg for model hyperparameters.")
+        model = MoisesLight(
+            audio_channels=2,
+            nband=cfg.nband,
+            g=cfg.g,
+            nrope=cfg.nrope,
+            nsplit_enc=cfg.nsplit_enc,
+            nsplit_dec=cfg.nsplit_dec,
+            depth=3,
+            latent_dim=cfg.latent_dim,
+            freq_bins=cfg.stft.freq_bins,
+        )
+        model_state = {k.removeprefix("model."): v for k, v in ckpt["state_dict"].items() if k.startswith("model.")}
+        if not model_state:
+            raise RuntimeError(f"No model weights found in Lightning checkpoint: '{ckpt_path}'")
+        model.load_state_dict(model_state)
+    else:
+        raise RuntimeError(f"Unrecognized checkpoint format: '{ckpt_path}'")
     model.to(device)
     return model

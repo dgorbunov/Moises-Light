@@ -54,8 +54,7 @@ def _load_train_config_from_json(path: Path) -> TrainConfig:
 
 def _resolve_stem_run_dir(run_dir: Path) -> Path:
     config_path = run_dir / "config.json"
-    ckpt_path = run_dir / "best_legacy.pt"
-    if config_path.exists() and ckpt_path.exists():
+    if config_path.exists():
         return run_dir
 
     candidates = []
@@ -63,8 +62,7 @@ def _resolve_stem_run_dir(run_dir: Path) -> Path:
         if not child.is_dir():
             continue
         has_config = (child / "config.json").exists()
-        has_ckpt = (child / "best_legacy.pt").exists()
-        if has_config and has_ckpt:
+        if has_config:
             candidates.append(child)
 
     if len(candidates) == 1:
@@ -76,8 +74,25 @@ def _resolve_stem_run_dir(run_dir: Path) -> Path:
             "Pass the specific stem directory to --run-dir."
         )
     raise RuntimeError(
-        f"Could not find run artifacts under '{run_dir}'. Expected config.json and best_legacy.pt either "
-        "directly in this directory or in exactly one child directory."
+        f"Could not find run artifacts under '{run_dir}'. Expected config.json either directly in this "
+        "directory or in exactly one child directory."
+    )
+
+
+def _resolve_checkpoint_path(stem_run_dir: Path) -> Path:
+    legacy = stem_run_dir / "best_legacy.pt"
+    if legacy.exists():
+        return legacy
+
+    ckpt_dir = stem_run_dir / "checkpoints"
+    last_ckpt = ckpt_dir / "last.ckpt"
+    if last_ckpt.exists():
+        return last_ckpt
+    ckpt_candidates = sorted(ckpt_dir.glob("*.ckpt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if ckpt_candidates:
+        return ckpt_candidates[0]
+    raise RuntimeError(
+        f"No checkpoint found in '{stem_run_dir}'. Expected best_legacy.pt or *.ckpt in '{ckpt_dir}'."
     )
 
 
@@ -86,7 +101,7 @@ def _resolve_runtime_inputs(args: argparse.Namespace) -> tuple[TrainConfig, Path
         raise RuntimeError("Pass --run-dir with a top-level or stem run directory.")
     stem_run_dir = _resolve_stem_run_dir(Path(args.run_dir).expanduser())
     cfg = _load_train_config_from_json(stem_run_dir / "config.json")
-    ckpt_path = stem_run_dir / "best_legacy.pt"
+    ckpt_path = _resolve_checkpoint_path(stem_run_dir)
     return cfg, ckpt_path, stem_run_dir
 
 
@@ -127,7 +142,7 @@ def main() -> None:
     cfg, ckpt_path, stem_run_dir = _resolve_runtime_inputs(args)
 
     device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
-    model = load_model_from_ckpt(str(ckpt_path), device=device)
+    model = load_model_from_ckpt(str(ckpt_path), device=device, cfg=cfg)
     stft_params = STFTParams(
         n_fft=cfg.stft.n_fft,
         hop_length=cfg.stft.hop_length,
