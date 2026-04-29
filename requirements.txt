@@ -9,5 +9,3 @@ pyyaml
 einops
 stempeg
 musdb
-causal-conv1d
-mamba-ssm

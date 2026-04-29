@@ -68,7 +68,7 @@ mkdir -p logs
 # mamba-ssm CUDA extensions (~15 min) on every submission. Bump MARKER_CONTENT
 # whenever requirements.txt or the torch version changes.
 VENV_MARKER=".venv/.installed_marker"
-MARKER_CONTENT="torch-2.8.0+mamba-ssm"
+MARKER_CONTENT="torch-2.8.0+mamba-ssm-v2"
 TORCH_CUDA_INDEX=""
 
 rebuild_venv=false
@@ -100,12 +100,26 @@ if [ "${rebuild_venv}" = "true" ]; then
     exit 1
   fi
 
-  # Install remaining requirements (torch/torchaudio entries are already satisfied).
+  # Install all requirements except mamba packages (handled separately below).
   python -m pip install -r requirements.txt --extra-index-url "${TORCH_CUDA_INDEX}"
   python -m pip install -e .
 
-  # Write marker so subsequent jobs skip the install step.
-  echo "${MARKER_CONTENT}" > "${VENV_MARKER}"
+  # Build mamba CUDA extensions against the currently installed PyTorch headers.
+  # --no-build-isolation prevents pip from creating an isolated build env, so
+  # the extension compiles against the exact PyTorch ABI already in this venv.
+  echo "Building causal-conv1d from source (--no-build-isolation)..."
+  python -m pip install "causal-conv1d>=1.4.0" --no-build-isolation
+  echo "Building mamba-ssm from source (--no-build-isolation)..."
+  python -m pip install mamba-ssm --no-build-isolation
+
+  # Verify the import works before writing the marker.
+  if python -c "from mamba_ssm import Mamba; print('mamba-ssm import OK')"; then
+    echo "${MARKER_CONTENT}" > "${VENV_MARKER}"
+    echo "mamba-ssm built successfully — venv will be reused on future jobs."
+  else
+    echo "WARNING: mamba-ssm built but import still fails. Training will use pure-PyTorch fallback."
+    echo "${MARKER_CONTENT}-fallback" > "${VENV_MARKER}"
+  fi
 else
   echo "Reusing existing .venv (marker: ${MARKER_CONTENT})"
   source .venv/bin/activate
