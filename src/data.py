@@ -124,9 +124,31 @@ class MusdbDataModule(L.LightningDataModule):
     def train_dataloader(self) -> DataLoader:
         if self._train_ds is None:
             raise RuntimeError("setup() must run before requesting dataloaders.")
-        return DataLoader(self._train_ds, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, persistent_workers=self.num_workers > 0, drop_last=True)
+        # persistent_workers=True has caused indefinite hangs at train→val boundaries on NFS +
+        # multiprocessing (workers stuck while Lightning switches dataloaders). Keep workers,
+        # but tear down worker processes each epoch — small overhead, avoids deadlock.
+        return DataLoader(
+            self._train_ds,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            persistent_workers=False,
+            drop_last=True,
+        )
 
     def val_dataloader(self) -> DataLoader:
         if self._val_ds is None:
             raise RuntimeError("setup() must run before requesting dataloaders.")
-        return DataLoader(self._val_ds, batch_size=1, shuffle=False, num_workers=max(1, self.num_workers // 2), pin_memory=True, persistent_workers=self.num_workers > 1, drop_last=False)
+        # Same batch_size as train — keeps Mamba2 intermediate shapes aligned so validation
+        # reuses the same compiled kernels instead of JIT-autotuning a separate geometry.
+        # (Hardcoded batch_size=1 made every val epoch compile/run its own narrow-batch paths.)
+        return DataLoader(
+            self._val_ds,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=max(1, self.num_workers // 2),
+            pin_memory=True,
+            persistent_workers=False,
+            drop_last=False,
+        )

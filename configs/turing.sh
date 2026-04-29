@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=64
 #SBATCH --mem=64g
 #SBATCH --job-name="moises_light_vocals"
 #SBATCH --partition=academic
@@ -47,6 +47,7 @@ done
 
 # Move to submission directory (where sbatch was run).
 cd "${SLURM_SUBMIT_DIR}"
+export PYTHONUNBUFFERED=1
 
 # Turing docs recommend loading python/cuda modules for GPU jobs.
 module load python
@@ -68,7 +69,7 @@ mkdir -p logs
 # mamba-ssm CUDA extensions (~15 min) on every submission. Bump MARKER_CONTENT
 # whenever requirements.txt or the torch version changes.
 VENV_MARKER=".venv/.installed_marker"
-MARKER_CONTENT="torch-cu129-uv-mamba-git-v11"
+MARKER_CONTENT="torch-cu129-uv-mamba2-v12"
 
 rebuild_venv=false
 if [ ! -d ".venv" ] || [ ! -f "${VENV_MARKER}" ] || [ "$(cat "${VENV_MARKER}" 2>/dev/null)" != "${MARKER_CONTENT}" ]; then
@@ -98,23 +99,31 @@ if [ "${rebuild_venv}" = "true" ]; then
   uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu129
   uv pip install -e .
 
-  # Build mamba-ssm from git (exact approach from afrenkai/mamba-glibc-fix).
   export TORCH_CUDA_ARCH_LIST="8.0"
   export LD_LIBRARY_PATH="$(python -c 'import torch, os; print(os.path.dirname(torch.__file__)+"/lib")'):${LD_LIBRARY_PATH:-}"
+  export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+
+  # wheel must be present before building mamba-ssm: its setup.py imports
+  # from wheel.bdist_wheel at parse time and is not declared as a build dep.
+  uv pip install wheel
+
+  # causal-conv1d is required by Mamba2 but commented out of mamba-ssm's
+  # setup.py (line 405), so it must be installed explicitly beforehand.
+  echo "Building causal-conv1d..."
+  uv pip install --no-build-isolation --no-cache-dir causal-conv1d
 
   MAMBA_BUILD_DIR="/tmp/mamba-ssm-build-$$"
   git clone --depth 1 https://github.com/state-spaces/mamba.git "${MAMBA_BUILD_DIR}"
-  echo "Building mamba-ssm from git clone..."
-  # Non-editable install: copies into site-packages so the source dir can be removed.
-  MAX_JOBS=4 uv pip install --no-build-isolation --no-cache-dir "${MAMBA_BUILD_DIR}"
+  echo "Building mamba-ssm..."
+  uv pip install --no-build-isolation --no-cache-dir "${MAMBA_BUILD_DIR}"
   rm -rf "${MAMBA_BUILD_DIR}"
 
-  if python -c "from mamba_ssm import Mamba; print('mamba-ssm import OK')"; then
+  if python -c "from mamba_ssm import Mamba2; print('mamba-ssm Mamba2 import OK')"; then
     echo "${MARKER_CONTENT}" > "${VENV_MARKER}"
     echo "mamba-ssm built successfully — venv will be reused on future jobs."
   else
-    echo "WARNING: mamba-ssm CUDA kernels unavailable. Training uses pure-PyTorch Mamba fallback."
-    echo "${MARKER_CONTENT}" > "${VENV_MARKER}"
+    echo "ERROR: mamba-ssm Mamba2 import failed after build."
+    exit 1
   fi
 
 else
@@ -136,6 +145,7 @@ print("lightning version:", getattr(lightning, "__version__", "unknown"))
 PY
 
 export TRAIN_CONFIG
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
 if [ ! -f "${TRAIN_CONFIG}" ]; then
   echo "Missing training config: ${TRAIN_CONFIG}"

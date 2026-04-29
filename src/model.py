@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import warnings
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -287,69 +285,7 @@ class DualPathRoPEBlock(nn.Module):
         return z_band.reshape(b, t, bands, d).permute(0, 2, 1, 3).contiguous()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Pure-PyTorch Mamba fallback + factory
-# ──────────────────────────────────────────────────────────────────────────────
-
-class _MambaPure(nn.Module):
-    """
-    Pure-PyTorch Mamba1 SSM. No custom CUDA kernels — used automatically when
-    mamba-ssm is unavailable or has a PyTorch ABI mismatch.
-
-    Matches the mamba_ssm.Mamba interface: input/output (B, L, d_model).
-    Uses a sequential scan which is O(L) steps; efficient for the short
-    sequences in the bottleneck (L ≈ 38 frames after 3× time downsampling).
-    """
-
-    def __init__(self, d_model: int, d_state: int = 16, d_conv: int = 4, expand: int = 2) -> None:
-        super().__init__()
-        d_inner = int(expand * d_model)
-        self.d_inner = d_inner
-        self.d_state = d_state
-        self.in_proj = nn.Linear(d_model, 2 * d_inner, bias=False)
-        self.conv1d = nn.Conv1d(d_inner, d_inner, kernel_size=d_conv, padding=d_conv - 1, groups=d_inner, bias=True)
-        self.x_proj = nn.Linear(d_inner, 2 * d_state + 1, bias=False)
-        self.dt_proj = nn.Linear(1, d_inner, bias=True)
-        nn.init.constant_(self.dt_proj.bias, -2.0)
-        A = torch.arange(1, d_state + 1, dtype=torch.float32).unsqueeze(0).expand(d_inner, -1)
-        self.A_log = nn.Parameter(torch.log(A.clone()))
-        self.D = nn.Parameter(torch.ones(d_inner))
-        self.out_proj = nn.Linear(d_inner, d_model, bias=False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # (B, L, d_model)
-        B, L, _ = x.shape
-        x_in, z = self.in_proj(x).chunk(2, dim=-1)         # each (B, L, d_inner)
-        x_conv = self.conv1d(x_in.transpose(1, 2))[:, :, :L].transpose(1, 2)
-        x_act = F.silu(x_conv)                              # (B, L, d_inner)
-        ssm = self.x_proj(x_act)                            # (B, L, 2*d_state+1)
-        B_ssm = ssm[..., : self.d_state]
-        C_ssm = ssm[..., self.d_state : 2 * self.d_state]
-        dt = F.softplus(self.dt_proj(ssm[..., -1:]))        # (B, L, d_inner)
-        A = -torch.exp(self.A_log.float())                  # (d_inner, d_state)
-        dA = torch.exp(dt.unsqueeze(-1) * A)                # (B, L, d_inner, d_state)
-        dB = dt.unsqueeze(-1) * B_ssm.unsqueeze(2)          # (B, L, d_inner, d_state)
-        h = x_act.new_zeros(B, self.d_inner, self.d_state)
-        ys: list[torch.Tensor] = []
-        for t in range(L):
-            h = dA[:, t] * h + dB[:, t] * x_act[:, t].unsqueeze(-1)
-            ys.append((h * C_ssm[:, t].unsqueeze(1)).sum(-1))
-        y = torch.stack(ys, dim=1)                          # (B, L, d_inner)
-        y = (y + x_act * self.D) * F.silu(z)               # D residual + output gate
-        return self.out_proj(y)
-
-
-def _make_mamba(d_model: int, d_state: int = 16, d_conv: int = 4, expand: int = 2) -> nn.Module:
-    """Return mamba_ssm.Mamba if importable, else fall back to pure-PyTorch _MambaPure."""
-    try:
-        from mamba_ssm import Mamba  # type: ignore[import]
-        return Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-    except Exception as exc:
-        warnings.warn(
-            f"mamba-ssm unavailable ({type(exc).__name__}: {exc}). "
-            "Using pure-PyTorch Mamba fallback — training proceeds normally on GPU.",
-            stacklevel=3,
-        )
-        return _MambaPure(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+from mamba_ssm import Mamba2
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -358,20 +294,22 @@ def _make_mamba(d_model: int, d_state: int = 16, d_conv: int = 4, expand: int = 
 
 class DualPathMambaBlock(nn.Module):
     """
-    Dual-path selective state-space block using Mamba.
+    Dual-path Mamba2 SSM block.
 
-    Runs Mamba scans along the time axis (per band) then the band axis (per time
-    step). Uses mamba-ssm if importable, otherwise falls back to a pure-PyTorch
-    implementation automatically — training proceeds regardless.
-    Input/output shape: (B, nband, T, latent_dim).
+    Runs Mamba2 scans along the time axis (per band) then the band axis (per
+    time step). Input/output shape: (B, nband, T, latent_dim).
     """
 
     def __init__(self, latent_dim: int) -> None:
         super().__init__()
         self.time_norm = nn.LayerNorm(latent_dim)
         self.band_norm = nn.LayerNorm(latent_dim)
-        self.time_mamba = _make_mamba(latent_dim, d_state=16, d_conv=4, expand=2)
-        self.band_mamba = _make_mamba(latent_dim, d_state=16, d_conv=4, expand=2)
+        # chunk_size must divide both seqlens fed at runtime:
+        #   time_mamba: T_bottleneck = ceil(T_stft / 2^depth) = 38  (7s, hop=1024, depth=3)
+        #   band_mamba: nband = 4
+        # chunk_size=2 divides both; chunk_size=256 (default) does not.
+        self.time_mamba = Mamba2(d_model=latent_dim, d_state=64, d_conv=4, expand=2, chunk_size=2)
+        self.band_mamba = Mamba2(d_model=latent_dim, d_state=64, d_conv=4, expand=2, chunk_size=2)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:  # (B, bands, T, d)
         b, bands, t, d = z.shape
@@ -398,8 +336,7 @@ class BottleneckRoPE(nn.Module):
         → reshape → (B, C, 1, T_b)
         → add as residual broadcast over freq dim
 
-    use_mamba=True swaps the transformer blocks for Mamba SSM scans.
-    Falls back to pure-PyTorch automatically if mamba-ssm has an ABI issue.
+    use_mamba=True swaps the transformer blocks for Mamba2 SSM scans.
     """
 
     def __init__(
@@ -483,7 +420,7 @@ class MoisesLight(nn.Module):
       use_weight_sharing: share conv weights across the two high-frequency bands
                           in every SplitMergeBlock to reduce parameter count ~15%.
       use_mamba:          replace RoPE transformer blocks in the bottleneck with
-                          Mamba SSM scans (requires mamba-ssm package).
+                          Mamba2 SSM scans.
     """
 
     def __init__(

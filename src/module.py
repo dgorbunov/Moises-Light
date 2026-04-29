@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import os
+import time
 
 import lightning as L
 import torch
@@ -46,23 +48,94 @@ class MoisesModule(L.LightningModule):
     def forward(self, mix_spec: torch.Tensor) -> torch.Tensor:
         return self.model(mix_spec)
 
+    def on_fit_start(self) -> None:
+        """Mirror real train + val paths so JIT sees fwd/bwd + MoisesLoss + eval mode.
+
+        A forward-only warmup completes instantly when kernels are cached, but the first real
+        training_step still spends minutes compiling backward kernels (Mamba2 bwd Triton),
+        istft/multires grads inside MoisesLoss, and audiomentations — none of which ran here.
+        Validation runs in eval() without augment — separate graph from train.
+        """
+        if not self.cfg.use_mamba or not torch.cuda.is_available():
+            return
+        self.print(
+            "Mamba2 warmup: train fwd+bwd + eval fwd (MoisesLoss & augment included). "
+            "First run can take several minutes...",
+            flush=True,
+        )
+        seg_len = int(self.cfg.sample_rate * self.cfg.segment_seconds)
+        bs = self.cfg.batch_size
+
+        # Train path — matches training_step (Lightning wraps autocast for bf16-mixed too).
+        self.train()
+        wav_m = torch.randn(bs, 2, seg_len, device=self.device)
+        wav_t = torch.randn(bs, 2, seg_len, device=self.device)
+        self.zero_grad(set_to_none=True)
+        mixture, target = self.augment(wav_m, wav_t)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            tgt_spec = target_spectrogram(target, self.stft_params)
+            pred_spec = self.model(target_spectrogram(mixture, self.stft_params))
+            loss = self.loss_fn(pred_spec, tgt_spec, tgt_wav=target)
+        loss.backward()
+        self.zero_grad(set_to_none=True)
+        torch.cuda.synchronize()
+
+        # Val path — matches validation_step (eval(), no augment).
+        self.eval()
+        with torch.no_grad():
+            wav = torch.randn(bs, 2, seg_len, device=self.device)
+            mixture_v, target_v = wav, wav.clone()
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                tgt_spec_v = target_spectrogram(target_v, self.stft_params)
+                pred_spec_v = self.model(target_spectrogram(mixture_v, self.stft_params))
+                _ = torch.mean(torch.abs(pred_spec_v - tgt_spec_v))
+        self.train()
+        torch.cuda.synchronize()
+        self.print("Mamba2 warmup done.", flush=True)
+
+    def on_train_epoch_start(self) -> None:
+        # Avoid printing every epoch — tqdm/Rich progress bar uses \\r on one line; extra prints
+        # break the bar (looks like "missing progress bar"). Enable via env when debugging:
+        #   MAMBA_LIGHT_DEBUG_PRINTS=1 sbatch configs/turing.sh ...
+        if self.cfg.use_mamba and os.environ.get("MAMBA_LIGHT_DEBUG_PRINTS"):
+            self.print(f"on_train_epoch_start epoch={self.current_epoch}", flush=True)
+
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        dbg = os.environ.get("MAMBA_LIGHT_DEBUG_PRINTS")
+        if dbg and batch_idx == 0:
+            self.print(f"training_step batch 0 arrived global_step={self.global_step}", flush=True)
+        t0 = time.perf_counter()
         mixture, target = self.augment(*batch)
         tgt_spec = target_spectrogram(target, self.stft_params)
         pred_spec = self.model(target_spectrogram(mixture, self.stft_params))
         loss = self.loss_fn(pred_spec, tgt_spec, tgt_wav=target)
+        if dbg and batch_idx == 0:
+            torch.cuda.synchronize()
+            self.print(f"first batch fwd+bwd took {time.perf_counter() - t0:.2f}s", flush=True)
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         interval = max(1, int(self.cfg.trainer.log_every_n_steps))
-        if (batch_idx + 1) % interval == 0:
-            self.print(f"train_step={self.global_step} batch_idx={batch_idx} loss={float(loss.detach().cpu()):.6f}")
+        if dbg and (batch_idx + 1) % interval == 0:
+            self.print(f"train_step={self.global_step} batch_idx={batch_idx} loss={float(loss.detach().cpu()):.6f}", flush=True)
         return loss
 
+    def on_validation_epoch_start(self) -> None:
+        if self.cfg.use_mamba and os.environ.get("MAMBA_LIGHT_DEBUG_PRINTS"):
+            self.print(f"on_validation_epoch_start epoch={self.current_epoch}", flush=True)
+
     def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        del batch_idx
+        dbg = os.environ.get("MAMBA_LIGHT_DEBUG_PRINTS")
+        if dbg and batch_idx == 0:
+            self.print(f"validation epoch {self.current_epoch}: batch 0 entering...", flush=True)
+        elif dbg and batch_idx % 5 == 0:
+            self.print(f"val batch_idx={batch_idx}", flush=True)
         mixture, target = batch
         tgt_spec = target_spectrogram(target, self.stft_params)
         pred_spec = self.model(target_spectrogram(mixture, self.stft_params))
         val_loss = torch.mean(torch.abs(pred_spec - tgt_spec))
+        if os.environ.get("MAMBA_LIGHT_DEBUG_PRINTS") and batch_idx == 0:
+            torch.cuda.synchronize()
+            self.print(f"val batch 0 forward complete loss_mean={float(val_loss.detach().cpu()):.6f}", flush=True)
+
         self.log("val_loss", val_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("val/loss", val_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         if (self.current_epoch + 1) % self.metrics_every_n_epochs != 0:

@@ -48,6 +48,8 @@ def load_model_from_ckpt(ckpt_path: str | Path, device: torch.device, cfg: Train
     if "hparams" in ckpt and "model" in ckpt:
         # Exported lightweight inference checkpoint.
         h = ckpt["hparams"]
+        stft_h = h.get("stft") or {}
+        freq_bins = int(stft_h.get("freq_bins", h.get("freq_bins", 2048))) if isinstance(stft_h, dict) else int(h.get("freq_bins", 2048))
         model = MoisesLight(
             audio_channels=2,
             nband=h["nband"],
@@ -57,7 +59,10 @@ def load_model_from_ckpt(ckpt_path: str | Path, device: torch.device, cfg: Train
             nsplit_dec=h["nsplit_dec"],
             depth=h["depth"],
             latent_dim=h.get("latent_dim", 128),
-            freq_bins=h.get("stft", {}).get("freq_bins", 2048),
+            freq_bins=freq_bins,
+            bf=h.get("bf", 8),
+            use_weight_sharing=h.get("use_weight_sharing", False),
+            use_mamba=h.get("use_mamba", False),
         )
         model.load_state_dict(ckpt["model"])
     elif "state_dict" in ckpt:
@@ -74,6 +79,9 @@ def load_model_from_ckpt(ckpt_path: str | Path, device: torch.device, cfg: Train
             depth=3,
             latent_dim=cfg.latent_dim,
             freq_bins=cfg.stft.freq_bins,
+            bf=getattr(cfg, "bf", 8),
+            use_weight_sharing=cfg.use_weight_sharing,
+            use_mamba=cfg.use_mamba,
         )
         model_state = {k.removeprefix("model."): v for k, v in ckpt["state_dict"].items() if k.startswith("model.")}
         if not model_state:

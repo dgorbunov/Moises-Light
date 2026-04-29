@@ -147,12 +147,12 @@ def main() -> None:
     debug_cb = DebugMetricsCallback()
     ckpt_cb = ModelCheckpoint(
         dirpath=str(run_dir / "checkpoints"),
-        filename="best-{epoch:03d}-{val_siSDR:.3f}-{val_loss:.4f}",
-        monitor="val_siSDR",
-        mode="max",
+        filename="best-{epoch:03d}-{val_loss:.4f}",
+        monitor="val_loss",
+        mode="min",
         save_top_k=1,
-        every_n_epochs=max(1, int(cfg.metrics_every_n_epochs)),
         save_last=True,
+        every_n_epochs=1,
     )
     early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=cfg.early_stop_patience_epochs)
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
@@ -169,6 +169,7 @@ def main() -> None:
         deterministic=cfg.trainer.deterministic,
         enable_progress_bar=True,
         gradient_clip_val=1.0,
+        num_sanity_val_steps=0,
     )
     trainer.fit(model=module, datamodule=datamodule, ckpt_path=args.resume or None)
     _export_legacy_checkpoint(trainer=trainer, cfg=cfg, run_dir=run_dir)
