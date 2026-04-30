@@ -12,12 +12,19 @@
 set -euo pipefail
 
 # ---- CLI flags (passed through sbatch script args) ----
-# Example:
+# Example (fresh run):
 #   sbatch configs/turing.sh --train-config configs/vocals_short.yaml --stem vocals --test-type quick
+# Example (resume — reuse the same parent out-dir and pass a Lightning .ckpt):
+#   sbatch configs/turing.sh --train-config configs/vocals_short.yaml --stem vocals \
+#     --out-dir runs/vocals_short_04-29_12-00 \
+#     --resume runs/vocals_short_04-29_12-00/vocals/checkpoints/last.ckpt \
+#     --test-type none
 TRAIN_CONFIG="configs/vocals_short.yaml"
 STEM="vocals"
 TEST_TYPE="quick"  # quick | full | none
 MAX_TEST_TRACKS="" # optional manual override
+OUT_DIR_OVERRIDE="" # if set, used instead of a new runs/<config>_<stamp> dir (for resume)
+RESUME=""             # Lightning checkpoint path (typically .../checkpoints/last.ckpt)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,9 +44,19 @@ while [[ $# -gt 0 ]]; do
       MAX_TEST_TRACKS="$2"
       shift 2
       ;;
+    --out-dir)
+      OUT_DIR_OVERRIDE="$2"
+      shift 2
+      ;;
+    --resume)
+      RESUME="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1"
-      echo "Usage: sbatch configs/turing.sh [--train-config <path>] [--stem <vocals|drums|bass|other>] [--test-type <quick|full|none>] [--max-test-tracks <N>]"
+      echo "Usage: sbatch configs/turing.sh [--train-config <path>] [--stem <vocals|drums|bass|other>]"
+      echo "       [--test-type <quick|full|none>] [--max-test-tracks <N>]"
+      echo "       [--out-dir <runs/...>] [--resume <path/to/last.ckpt>]"
       exit 1
       ;;
   esac
@@ -162,14 +179,21 @@ print("Config check passed: using 7-second segments.")
 PY
 
 CFG_BASENAME="$(basename "${TRAIN_CONFIG}" .yaml)"
-RUN_STAMP="$(date +%m-%d_%H-%M)"
-OUT_DIR="runs/${CFG_BASENAME}_${RUN_STAMP}"
+if [[ -n "${OUT_DIR_OVERRIDE}" ]]; then
+  OUT_DIR="${OUT_DIR_OVERRIDE}"
+else
+  RUN_STAMP="$(date +%m-%d_%H-%M)"
+  OUT_DIR="runs/${CFG_BASENAME}_${RUN_STAMP}"
+fi
 
 TRAIN_ARGS=(
   --config "${TRAIN_CONFIG}"
   --target-stem "${STEM}"
   --out-dir "${OUT_DIR}"
 )
+if [[ -n "${RESUME}" ]]; then
+  TRAIN_ARGS+=(--resume "${RESUME}")
+fi
 
 python scripts/train.py "${TRAIN_ARGS[@]}"
 
