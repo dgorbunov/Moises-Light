@@ -40,7 +40,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--musdb-root", type=str, default="", help="MUSDB18 root folder")
     p.add_argument("--target-stem", type=str, default="", help="vocals|drums|bass|other")
     p.add_argument("--out-dir", type=str, default="", help="output dir for checkpoints/logs")
-    p.add_argument("--max-train-samples", type=int, default=-1, help="Cap number of train samples per epoch")
     p.add_argument("--max-val-samples", type=int, default=-1, help="Cap number of validation samples per epoch")
     p.add_argument("--debug", action="store_true", help="Enable debug mode (2 tracks, 10 epochs)")
     p.add_argument("--resume", type=str, default="", help="Optional checkpoint path to resume from")
@@ -53,8 +52,6 @@ def _build_cfg(args: argparse.Namespace) -> TrainConfig:
         cfg = TrainConfig(**{**cfg.__dict__, "target_stem": args.target_stem})
     if args.out_dir:
         cfg = TrainConfig(**{**cfg.__dict__, "out_dir": args.out_dir})
-    if args.max_train_samples >= 0:
-        cfg = TrainConfig(**{**cfg.__dict__, "max_train_samples": args.max_train_samples})
     if args.max_val_samples >= 0:
         cfg = TrainConfig(**{**cfg.__dict__, "max_val_samples": args.max_val_samples})
     if args.debug and not cfg.debug:
@@ -140,7 +137,6 @@ def main() -> None:
         debug=cfg.debug,
         debug_num_tracks=cfg.debug_num_tracks,
         chunks_per_track=cfg.chunks_per_track,
-        max_train_samples=cfg.max_train_samples,
         max_val_samples=cfg.max_val_samples,
     )
     module = MoisesModule(cfg=cfg)

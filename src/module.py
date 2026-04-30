@@ -104,7 +104,6 @@ class MoisesModule(L.LightningModule):
         pred_spec = self.model(target_spectrogram(mixture, self.stft_params))
         val_loss = torch.mean(torch.abs(pred_spec - tgt_spec))
         self.log("val_loss", val_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log("val/loss", val_loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         if (self.current_epoch + 1) % self.metrics_every_n_epochs != 0:
             return val_loss
         with torch.no_grad():

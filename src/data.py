@@ -8,7 +8,13 @@ import lightning as L
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from audio_io import prepare_waveform_tensor
 from dataset_utils import looks_like_wav_layout, split_test_tracks
+
+
+def _native_track_sr(track, fallback: int) -> int:
+    r = getattr(track, "rate", None)
+    return int(r) if r is not None else fallback
 
 
 class MusdbTrainChunkDataset(Dataset):
@@ -19,7 +25,6 @@ class MusdbTrainChunkDataset(Dataset):
         sample_rate: int,
         segment_seconds: float = 7.0,
         chunks_per_track: int = 100,
-        max_samples: int = 0,
         min_target_rms_ratio: float = 0.15,
     ) -> None:
         self.tracks = tracks
@@ -28,8 +33,7 @@ class MusdbTrainChunkDataset(Dataset):
         self.segment_seconds = float(segment_seconds)
         self.chunks_per_track = int(chunks_per_track)
         self.min_target_rms_ratio = float(min_target_rms_ratio)
-        base_length = max(1, len(tracks) * self.chunks_per_track)
-        self._length = min(base_length, max_samples) if max_samples and max_samples > 0 else base_length
+        self._length = max(1, len(tracks) * self.chunks_per_track)
 
     def __len__(self) -> int:
         return self._length
@@ -43,8 +47,13 @@ class MusdbTrainChunkDataset(Dataset):
         # music with no vocals) are skipped so the model isn't trained on them.
         for _ in range(8):
             track.chunk_start = random.uniform(0.0, max_start) if max_start > 0.0 else 0.0
-            mixture = torch.from_numpy(track.audio.T).float()
-            target = torch.from_numpy(track.targets[self.target_stem].audio.T).float()
+            sr = _native_track_sr(track, self.sample_rate)
+            mixture, _ = prepare_waveform_tensor(torch.from_numpy(track.audio.T).float(), sr, self.sample_rate)
+            target, _ = prepare_waveform_tensor(
+                torch.from_numpy(track.targets[self.target_stem].audio.T).float(),
+                sr,
+                self.sample_rate,
+            )
             mix_rms = float(mixture.pow(2).mean().sqrt())
             tgt_rms = float(target.pow(2).mean().sqrt())
             if mix_rms < 1e-6 or tgt_rms / (mix_rms + 1e-9) >= self.min_target_rms_ratio:
@@ -53,9 +62,17 @@ class MusdbTrainChunkDataset(Dataset):
 
 
 class MusdbValRandomChunkDataset(Dataset):
-    def __init__(self, tracks: list, target_stem: str, segment_seconds: float = 7.0, max_samples: int = 0) -> None:
+    def __init__(
+        self,
+        tracks: list,
+        target_stem: str,
+        sample_rate: int,
+        segment_seconds: float = 7.0,
+        max_samples: int = 0,
+    ) -> None:
         self.tracks = tracks
         self.target_stem = target_stem
+        self.sample_rate = int(sample_rate)
         self.segment_seconds = float(segment_seconds)
         self.max_samples = max_samples
 
@@ -68,7 +85,14 @@ class MusdbValRandomChunkDataset(Dataset):
         track.chunk_duration = self.segment_seconds
         max_start = max(0.0, float(track.duration) - self.segment_seconds)
         track.chunk_start = random.uniform(0.0, max_start) if max_start > 0.0 else 0.0
-        return torch.from_numpy(track.audio.T).float(), torch.from_numpy(track.targets[self.target_stem].audio.T).float()
+        sr = _native_track_sr(track, self.sample_rate)
+        mix, _ = prepare_waveform_tensor(torch.from_numpy(track.audio.T).float(), sr, self.sample_rate)
+        tgt, _ = prepare_waveform_tensor(
+            torch.from_numpy(track.targets[self.target_stem].audio.T).float(),
+            sr,
+            self.sample_rate,
+        )
+        return mix, tgt
 
 
 class MusdbDataModule(L.LightningDataModule):
@@ -83,7 +107,6 @@ class MusdbDataModule(L.LightningDataModule):
         debug: bool = False,
         debug_num_tracks: int = 2,
         chunks_per_track: int = 8,
-        max_train_samples: int = 0,
         max_val_samples: int = 0,
     ) -> None:
         super().__init__()
@@ -96,7 +119,6 @@ class MusdbDataModule(L.LightningDataModule):
         self.debug = debug
         self.debug_num_tracks = debug_num_tracks
         self.chunks_per_track = chunks_per_track
-        self.max_train_samples = max_train_samples
         self.max_val_samples = max_val_samples
         self._train_ds: MusdbTrainChunkDataset | None = None
         self._val_ds: MusdbValRandomChunkDataset | None = None
@@ -118,8 +140,10 @@ class MusdbDataModule(L.LightningDataModule):
         if self.debug:
             train_tracks = train_tracks[: self.debug_num_tracks]
             val_tracks = val_tracks[: self.debug_num_tracks]
-        self._train_ds = MusdbTrainChunkDataset(train_tracks, self.target_stem, self.sample_rate, self.segment_seconds, self.chunks_per_track, self.max_train_samples)
-        self._val_ds = MusdbValRandomChunkDataset(val_tracks, self.target_stem, self.segment_seconds, self.max_val_samples)
+        self._train_ds = MusdbTrainChunkDataset(train_tracks, self.target_stem, self.sample_rate, self.segment_seconds, self.chunks_per_track)
+        self._val_ds = MusdbValRandomChunkDataset(
+            val_tracks, self.target_stem, self.sample_rate, self.segment_seconds, self.max_val_samples
+        )
 
     def train_dataloader(self) -> DataLoader:
         if self._train_ds is None:

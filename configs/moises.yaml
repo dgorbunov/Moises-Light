@@ -1,5 +1,4 @@
 musdb_root: "~/musdb18hq"
-max_train_samples: 0
 max_val_samples: 25
 chunks_per_track: 8
 target_stem: "vocals"
@@ -10,7 +9,7 @@ train_overlap: 0.75
 eval_overlap: 0.50
 
 batch_size: 8
-num_workers: 12
+num_workers: 16
 lr: 0.0002
 lr_patience_epochs: 20
 lr_factor: 0.9
@@ -42,10 +41,10 @@ use_mamba: false
 
 trainer:
   accelerator: "gpu"
-  devices: 1
+  devices: 2
   strategy: "auto"
   precision: "bf16-mixed"
-  max_epochs: 200
+  max_epochs: 300
   deterministic: false
 
 out_dir: "runs/moises_light"

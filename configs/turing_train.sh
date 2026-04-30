@@ -2,10 +2,10 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=64g
-#SBATCH --job-name="moises_light_vocals"
+#SBATCH --job-name="moises_train"
 #SBATCH --partition=academic
 #SBATCH --time=0-20:00:00
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
@@ -13,13 +13,13 @@ set -euo pipefail
 
 # ---- CLI flags (passed through sbatch script args) ----
 # Example (fresh run):
-#   sbatch configs/turing.sh --train-config configs/vocals_short.yaml --stem vocals --test-type quick
+#   sbatch configs/turing_train.sh --train-config configs/moises++.yaml --stem vocals --test-type quick
 # Example (resume — reuse the same parent out-dir and pass a Lightning .ckpt):
-#   sbatch configs/turing.sh --train-config configs/vocals_short.yaml --stem vocals \
-#     --out-dir runs/vocals_short_04-29_12-00 \
-#     --resume runs/vocals_short_04-29_12-00/vocals/checkpoints/last.ckpt \
+#   sbatch configs/turing_train.sh --train-config configs/moises++.yaml --stem vocals \
+#     --out-dir runs/moises++_04-29_12-00 \
+#     --resume runs/moises++_04-29_12-00/vocals/checkpoints/last.ckpt \
 #     --test-type none
-TRAIN_CONFIG="configs/vocals_short.yaml"
+TRAIN_CONFIG="configs/moises++.yaml"
 STEM="vocals"
 TEST_TYPE="quick"  # quick | full | none
 MAX_TEST_TRACKS="" # optional manual override

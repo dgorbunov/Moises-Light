@@ -1,5 +1,4 @@
 musdb_root: "~/musdb18hq"
-max_train_samples: 0
 max_val_samples: 24
 chunks_per_track: 8
 target_stem: "vocals"
@@ -42,10 +41,10 @@ use_mamba: true
 
 trainer:
   accelerator: "gpu"
-  devices: 1
+  devices: 2
   strategy: "auto"
   precision: "bf16-mixed"
-  max_epochs: 200
+  max_epochs: 300
   deterministic: false
 
 out_dir: "runs/moises_light"
