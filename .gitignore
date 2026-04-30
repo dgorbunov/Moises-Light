@@ -2,7 +2,7 @@ docs/
 .DS_Store
 .wav
 runs/
-
+songs/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
