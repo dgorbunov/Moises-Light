@@ -46,7 +46,6 @@ trainer:
   strategy: "auto"
   precision: "bf16-mixed"
   max_epochs: 10
-  log_every_n_steps: 1
   deterministic: false
 
 out_dir: "runs/moises_light"

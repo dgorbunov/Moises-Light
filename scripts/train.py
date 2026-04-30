@@ -9,7 +9,7 @@ import warnings
 
 import lightning as L
 import torch
-from lightning.pytorch.callbacks import Callback, EarlyStopping, LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, EarlyStopping, LearningRateMonitor, ModelCheckpoint, TQDMProgressBar
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -156,6 +156,8 @@ def main() -> None:
     )
     early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=cfg.early_stop_patience_epochs)
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    # tqdm via Lightning's TQDMProgressBar: works in terminals and SLURM logs (tail -f), unlike Rich redraw.
+    tqdm_bar = TQDMProgressBar(refresh_rate=1, leave=True)
     runtime = _resolve_runtime(cfg)
     trainer = L.Trainer(
         accelerator=runtime["accelerator"],
@@ -164,7 +166,7 @@ def main() -> None:
         precision=runtime["precision"],
         max_epochs=cfg.debug_epochs if cfg.debug else cfg.trainer.max_epochs,
         default_root_dir=str(run_dir),
-        callbacks=[ckpt_cb, early_stop, lr_monitor, debug_cb],
+        callbacks=[tqdm_bar, ckpt_cb, early_stop, lr_monitor, debug_cb],
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         deterministic=cfg.trainer.deterministic,
         enable_progress_bar=True,
