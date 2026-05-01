@@ -8,13 +8,14 @@ import sys
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from audio_io import load_mixture_and_optional_reference_for_test, prepare_waveform_tensor, save_audio
+from audio_io import load_audio_adapted_for_inference, load_mixture_and_optional_reference_for_test, save_audio
 from config import TrainConfig, load_config
 from dataset_utils import looks_like_wav_layout, split_test_tracks
 from infer import load_model_from_ckpt, separate_track
@@ -42,9 +43,20 @@ def _parse_args() -> argparse.Namespace:
         "--mixture-wav",
         type=str,
         default="",
-        help="Instead of MUSDB test split: path to mixture audio (default: resample/stereo/clamp like MUSDB18-HQ).",
+        help="Instead of MUSDB test split: arbitrary mixture path. Without --reference-wav: decode/resample/stereo/peak-normalize "
+        "like MUSDB18-HQ (matches training-scale inputs). With --reference-wav: see --no-adapt-web-audio.",
     )
     p.add_argument("--reference-wav", type=str, default="", help="With --mixture-wav: optional reference stem wav for SI-SDR metrics")
+    p.add_argument(
+        "--no-adapt-web-audio",
+        action="store_true",
+        help="Only with --mixture-wav + --reference-wav: require files already at config sample_rate stereo (strict load_audio).",
+    )
+    p.add_argument(
+        "--normalize-peak",
+        action="store_true",
+        help="Only with --mixture-wav + --reference-wav: scale mixture peak ~0.99 and apply same gain to reference.",
+    )
     p.add_argument(
         "--save-audio-dir",
         type=str,
@@ -97,13 +109,8 @@ def _eval_musdb_track(
     save_dir: Path | None,
     save_originals: bool,
 ) -> dict[str, float | int | str | dict[str, str]]:
-    sr = int(tr.rate) if getattr(tr, "rate", None) is not None else cfg.sample_rate
-    mix, _ = prepare_waveform_tensor(torch.from_numpy(tr.audio.T).float(), sr, cfg.sample_rate)
-    ref, _ = prepare_waveform_tensor(
-        torch.from_numpy(tr.targets[cfg.target_stem].audio.T).float(),
-        sr,
-        cfg.sample_rate,
-    )
+    mix = torch.from_numpy(tr.audio.T).float()
+    ref = torch.from_numpy(tr.targets[cfg.target_stem].audio.T).float()
     est = separate_track(
         model=model,
         mixture=mix,
@@ -139,11 +146,19 @@ def _run_mixture_wav(
 ) -> dict[str, object]:
     mix_path = Path(args.mixture_wav).expanduser()
     ref_path = Path(args.reference_wav).expanduser() if args.reference_wav else None
-    mix, ref, adapt_meta = load_mixture_and_optional_reference_for_test(
-        mix_path,
-        ref_path,
-        target_sample_rate=cfg.sample_rate,
-    )
+
+    if ref_path is None:
+        mix, mix_meta = load_audio_adapted_for_inference(mix_path, target_sample_rate=cfg.sample_rate)
+        adapt_meta = {"mixture_only_non_dataset": True, "mixture": mix_meta}
+        ref = None
+    else:
+        mix, ref, adapt_meta = load_mixture_and_optional_reference_for_test(
+            mix_path,
+            ref_path,
+            target_sample_rate=cfg.sample_rate,
+            adapt_web_audio=not args.no_adapt_web_audio,
+            normalize_peak=args.normalize_peak,
+        )
     est = separate_track(
         model=model,
         mixture=mix,
@@ -198,6 +213,10 @@ def main() -> None:
         raise RuntimeError("Use either --mixture-wav or --save-audio-dir, not both.")
     if args.reference_wav and not args.mixture_wav:
         raise RuntimeError("--reference-wav is only valid with --mixture-wav.")
+    if args.no_adapt_web_audio and not args.reference_wav:
+        raise RuntimeError("--no-adapt-web-audio applies only with --reference-wav (mixture-only paths always use adaptation).")
+    if args.normalize_peak and not args.reference_wav:
+        raise RuntimeError("--normalize-peak applies only with --reference-wav (mixture-only paths already use peak-safe adaptation).")
     if args.save_originals and not args.mixture_wav and not args.save_audio_dir:
         raise RuntimeError("--save-originals requires --save-audio-dir (MUSDB) or --mixture-wav.")
 
@@ -236,7 +255,13 @@ def main() -> None:
             save_dir=save_dir,
             save_originals=args.save_originals,
         )
-        for tr in tracks
+        for tr in tqdm(
+            tracks,
+            desc="MUSDB test tracks",
+            unit="track",
+            file=sys.stdout,
+            disable=False,
+        )
     ]
 
     sisdr_vals = np.asarray([float(r["song_median_siSDR"]) for r in per_track], dtype=np.float64)

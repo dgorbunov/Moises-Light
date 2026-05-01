@@ -83,11 +83,13 @@ python scripts/test.py --config configs/moises++.yaml --ckpt runs/my_run/vocals/
 
 **Single mixture file** — estimate is written beside the input as **`{mixture_stem}-{target_stem}.wav`**.
 
-Mixtures (including **`--mixture-wav`** / **`--reference-wav`**) use the same **`prepare_waveform_tensor`** path as training in **`audio_io`**: decode when needed, stereo layout, resample to **`sample_rate`**, clamp overs in **[−1, 1]** with mild scaling when peaks exceed **±1**. **MUSDB18-HQ** tracks (**44.1 kHz stereo**, peaks ≤ ~**1**) stay on an inexpensive branch (no resample / clamp copy). JSON includes **`input_adaptation`** (source rate/channels, resampling, scaling metadata).
+Training and **MUSDB** evaluation use the dataset tensors as in commit **51a19f6** (raw **`torch.from_numpy`**, no loader-side resampling). For **non-dataset** audio, **`--mixture-wav` without `--reference-wav`** runs **`load_audio_adapted_for_inference`** (decode, stereo, resample to **`sample_rate`**, clamp / mild peak scaling). JSON includes **`input_adaptation`**.
+
+With **`--reference-wav`**, use **`--no-adapt-web-audio`** if files are already **44.1 kHz stereo**, and optionally **`--normalize-peak`** for consistent SI-SDR levels.
 
 ```bash
 python scripts/test.py --config configs/moises++.yaml --ckpt runs/my_run/vocals/best_legacy.pt \
-  --mixture-wav path/to/mix.wav --reference-wav path/to/vocals.wav --save-originals
+  --mixture-wav path/to/mix.wav --reference-wav path/to/vocals.wav --save-originals --normalize-peak
 ```
 
 ---

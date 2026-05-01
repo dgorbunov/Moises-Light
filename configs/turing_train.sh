@@ -1,4 +1,5 @@
 #!/bin/bash
+
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=64g
@@ -23,8 +24,7 @@ TRAIN_CONFIG="configs/moises++.yaml"
 STEM="vocals"
 TEST_TYPE="quick"  # quick | full | none
 MAX_TEST_TRACKS="" # optional manual override
-OUT_DIR_OVERRIDE="" # if set, used instead of a new runs/<config>_<stamp> dir (for resume)
-RESUME=""             # Lightning checkpoint path (typically .../checkpoints/last.ckpt)
+RESUME=""             # Lightning checkpoint path
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

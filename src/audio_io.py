@@ -16,9 +16,8 @@ def load_audio(path: str | Path, sample_rate: int = 44100) -> torch.Tensor:
     return torch.from_numpy(audio).float().transpose(0, 1).contiguous()
 
 
-def decode_audio_file(path: str | Path) -> tuple[torch.Tensor, int]:
-    """Decode arbitrary audio to ``(wav, sr)`` with ``wav`` shape ``(C, T)`` float32."""
-    path = Path(path)
+def _load_waveform_any_format(path: Path) -> tuple[torch.Tensor, int]:
+    """Return ``(wav, sr)`` with ``wav`` shape ``(C, T)`` float32."""
     try:
         wav, sr = torchaudio.load(str(path))
     except Exception:
@@ -27,43 +26,53 @@ def decode_audio_file(path: str | Path) -> tuple[torch.Tensor, int]:
     return wav.contiguous(), int(sr)
 
 
-def prepare_waveform_tensor(wav: torch.Tensor, source_sr: int, target_sr: int) -> tuple[torch.Tensor, bool]:
-    """Bring decoded PCM toward training tensors: stereo ``(C, T)``, ``target_sr``, samples in ``[-1, 1]``.
-
-    Steps (when needed): mono→duplicate stereo or take first two channels, resample, scale overs,
-    clamp.
-
-    **MUSDB18-HQ-style data** (already stereo at ``target_sr`` with peaks ≤ ~1) hits a cheap path:
-    only dtype alignment and scalar peak checks — no resampling or clamp allocations.
-
-    Returns ``(tensor, scaled_down_overs)`` where the latter is True if samples above ±1 were
-    attenuated before clamping.
-    """
-    if wav.dim() != 2:
-        raise ValueError(f"Expected waveform (C, T), got shape {tuple(wav.shape)}")
-    wav = wav.float()
+def _to_target_channels_stereo(wav: torch.Tensor, target_channels: int) -> torch.Tensor:
     c = wav.shape[0]
-    if source_sr == target_sr and c == 2:
-        peak = wav.abs().max()
-        if peak <= 1.0 + 1e-6:
-            return wav, False
-
-    if c == 1:
-        wav = wav.repeat(2, 1)
-    elif c >= 2:
-        wav = wav[:2].contiguous()
-    else:
+    if c == 0:
         raise ValueError("Audio has zero channels.")
+    if target_channels != 2:
+        raise ValueError("Only target_channels=2 is supported (MUSDB mixtures/stems are stereo).")
+    if c == 1:
+        return wav.repeat(2, 1)
+    if c >= 2:
+        return wav[:2].contiguous()
+    raise RuntimeError(f"Unexpected channel count {c}")
 
-    if source_sr != target_sr:
-        wav = torchaudio.functional.resample(wav, source_sr, target_sr)
+
+def load_audio_adapted_for_inference(
+    path: str | Path,
+    *,
+    target_sample_rate: int,
+    target_channels: int = 2,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Decode arbitrary audio and shape it like **MUSDB18-HQ** training inputs (used for non-dataset WAVs).
+
+    Stereo layout, resample to ``target_sample_rate``, clamp to [-1, 1] with mild scaling when peaks exceed ±1.
+    """
+    path = Path(path)
+    wav, sr = _load_waveform_any_format(path)
+    meta: dict[str, Any] = {
+        "path": str(path),
+        "source_sample_rate": sr,
+        "source_channels": int(wav.shape[0]),
+        "target_sample_rate": target_sample_rate,
+        "resampled": sr != target_sample_rate,
+    }
+
+    wav = _to_target_channels_stereo(wav, target_channels)
+    if sr != target_sample_rate:
+        wav = torchaudio.functional.resample(wav, sr, target_sample_rate)
 
     peak = float(wav.abs().max().clamp_min(1e-12))
-    scaled = False
+    meta["peak_abs_before_scale"] = peak
     if peak > 1.0:
         wav = wav * (0.999 / peak)
-        scaled = True
-    return wav.clamp(-1.0, 1.0), scaled
+        meta["scaled_down_overs"] = True
+    else:
+        meta["scaled_down_overs"] = False
+    wav = wav.clamp(-1.0, 1.0)
+    meta["peak_abs_after_adapt"] = float(wav.abs().max())
+    return wav, meta
 
 
 def load_mixture_and_optional_reference_for_test(
@@ -71,39 +80,39 @@ def load_mixture_and_optional_reference_for_test(
     reference_path: Path | None,
     *,
     target_sample_rate: int,
+    adapt_web_audio: bool,
+    normalize_peak: bool,
 ) -> tuple[torch.Tensor, torch.Tensor | None, dict[str, Any]]:
-    """Decode mixture (+ optional reference), apply :func:`prepare_waveform_tensor`, trim to common length."""
+    """Load mixture (+ optional reference) for ``--mixture-wav`` when a reference stem is provided."""
+    summary: dict[str, Any] = {"adapt_web_audio": adapt_web_audio, "normalize_peak": normalize_peak}
 
-    def _prep_one(p: Path) -> tuple[torch.Tensor, dict[str, Any]]:
-        raw, sr = decode_audio_file(p)
-        peak_in = float(raw.abs().max())
-        out, scaled = prepare_waveform_tensor(raw, sr, target_sample_rate)
-        meta: dict[str, Any] = {
-            "path": str(p),
-            "source_sample_rate": sr,
-            "source_channels": int(raw.shape[0]),
-            "target_sample_rate": target_sample_rate,
-            "resampled": sr != target_sample_rate,
-            "peak_abs_before_adapt": peak_in,
-            "peak_abs_after_adapt": float(out.abs().max()),
-            "scaled_down_overs": scaled,
-        }
-        return out, meta
-
-    summary: dict[str, Any] = {}
-    mix, mix_meta = _prep_one(mixture_path)
-    summary["mixture"] = mix_meta
-
-    ref: torch.Tensor | None = None
-    if reference_path is not None:
-        ref, ref_meta = _prep_one(reference_path)
-        summary["reference"] = ref_meta
+    if not adapt_web_audio:
+        mix = load_audio(mixture_path, target_sample_rate)
+        ref = load_audio(reference_path, target_sample_rate) if reference_path else None
+        summary["mixture"] = {"mode": "strict"}
+        if reference_path:
+            summary["reference"] = {"mode": "strict"}
+    else:
+        mix, mix_meta = load_audio_adapted_for_inference(mixture_path, target_sample_rate=target_sample_rate)
+        summary["mixture"] = mix_meta
+        ref = None
+        if reference_path:
+            ref, ref_meta = load_audio_adapted_for_inference(reference_path, target_sample_rate=target_sample_rate)
+            summary["reference"] = ref_meta
 
     if ref is not None and mix.shape[-1] != ref.shape[-1]:
         n = min(mix.shape[-1], ref.shape[-1])
         summary["trimmed_to_samples"] = n
         mix = mix[..., :n]
         ref = ref[..., :n]
+
+    if normalize_peak:
+        peak = mix.abs().max().clamp_min(1e-12)
+        gain = 0.99 / peak
+        summary["peak_normalize_gain"] = float(gain)
+        mix = mix * gain
+        if ref is not None:
+            ref = ref * gain
 
     return mix, ref, summary
 

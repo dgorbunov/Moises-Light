@@ -1,5 +1,4 @@
 #!/bin/bash
-# MUSDB test-split evaluation or arbitrary mixture wav (scripts/test.py). Same env as training.
 
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
@@ -15,12 +14,14 @@ set -euo pipefail
 
 CONFIG=""
 CKPT=""
-MAX_TRACKS="5"
+MAX_TRACKS="25"
 SAVE_JSON=""
 MIXTURE_WAV=""
 REFERENCE_WAV=""
 SAVE_AUDIO_DIR=""
 SAVE_ORIGINALS=""
+NO_ADAPT_WEB=""
+NORMALIZE_PEAK=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,11 +57,19 @@ while [[ $# -gt 0 ]]; do
       SAVE_ORIGINALS="1"
       shift 1
       ;;
+    --no-adapt-web-audio)
+      NO_ADAPT_WEB="1"
+      shift 1
+      ;;
+    --normalize-peak)
+      NORMALIZE_PEAK="1"
+      shift 1
+      ;;
     *)
       echo "Unknown argument: $1"
       echo "Usage: sbatch configs/turing_test.sh --config <yaml> --ckpt <path> \\"
       echo "       [--max-tracks N|0 for all] [--save-json path] \\"
-      echo "       [--mixture-wav path [--reference-wav path] [--save-originals]] \\"
+      echo "       [--mixture-wav path [--reference-wav path] [--save-originals] [--normalize-peak] [--no-adapt-web-audio]] \\"
       echo "       [--save-audio-dir dir [--save-originals]]"
       exit 1
       ;;
@@ -105,6 +114,8 @@ TEST_ARGS=(--config "${CONFIG}" --ckpt "${CKPT}")
 if [[ -n "${MIXTURE_WAV}" ]]; then
   TEST_ARGS+=(--mixture-wav "${MIXTURE_WAV}")
   [[ -n "${REFERENCE_WAV}" ]] && TEST_ARGS+=(--reference-wav "${REFERENCE_WAV}")
+  [[ -n "${NO_ADAPT_WEB}" ]] && TEST_ARGS+=(--no-adapt-web-audio)
+  [[ -n "${NORMALIZE_PEAK}" ]] && TEST_ARGS+=(--normalize-peak)
 else
   if [[ "${MAX_TRACKS}" != "0" ]]; then
     TEST_ARGS+=(--max-tracks "${MAX_TRACKS}")
