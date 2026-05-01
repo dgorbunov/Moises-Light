@@ -12,14 +12,6 @@
 
 set -euo pipefail
 
-# ---- CLI flags (passed through sbatch script args) ----
-# Example (fresh run):
-#   sbatch configs/turing_train.sh --train-config configs/moises++.yaml --stem vocals --test-type quick
-# Example (resume — reuse the same parent out-dir and pass a Lightning .ckpt):
-#   sbatch configs/turing_train.sh --train-config configs/moises++.yaml --stem vocals \
-#     --out-dir runs/moises++_04-29_12-00 \
-#     --resume runs/moises++_04-29_12-00/vocals/checkpoints/last.ckpt \
-#     --test-type none
 TRAIN_CONFIG="configs/moises++.yaml"
 STEM="vocals"
 TEST_TYPE="quick"  # quick | full | none
@@ -62,14 +54,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Move to submission directory (where sbatch was run).
+# Move to submission directory.
 cd "${SLURM_SUBMIT_DIR}"
 export PYTHONUNBUFFERED=1
 
-# Turing docs recommend loading python/cuda modules for GPU jobs.
+# Load required modules.
 module load python
 module load cuda
-# stempeg (required by musdb import path) needs ffmpeg + ffprobe binaries.
+# musdb/stempeg requires ffmpeg and ffprobe.
 if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
   module load ffmpeg >/dev/null 2>&1 || true
 fi
@@ -81,10 +73,8 @@ fi
 
 mkdir -p logs
 
-# ---- Python environment setup ----
-# The venv is reused across jobs when the marker matches to avoid recompiling
-# mamba-ssm CUDA extensions (~15 min) on every submission. Bump MARKER_CONTENT
-# whenever requirements.txt or the torch version changes.
+# Python environment setup.
+# Rebuild when the marker changes.
 VENV_MARKER=".venv/.installed_marker"
 MARKER_CONTENT="torch-cu129-uv-mamba2-v12"
 
@@ -97,7 +87,7 @@ if [ "${rebuild_venv}" = "true" ]; then
   echo "Building Python virtual environment (marker '${MARKER_CONTENT}' not found or stale)..."
   rm -rf .venv
 
-  # Install uv if not already present (mirrors afrenkai/mamba-glibc-fix approach).
+  # Install uv if needed.
   if ! command -v uv >/dev/null 2>&1; then
     echo "Installing uv..."
     wget -qO- https://astral.sh/uv/install.sh | sh
@@ -107,8 +97,7 @@ if [ "${rebuild_venv}" = "true" ]; then
   uv venv .venv
   source .venv/bin/activate
 
-  # torch from cu129 (no version pin) — uv has its own cache, avoiding the
-  # stale cu130 wheel that pip keeps reusing from ~/.cache/pip.
+  # Install torch from cu129.
   echo "Installing torch from cu129..."
   uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu129
   echo "Torch installed: $(python -c 'import torch; print(torch.__version__, "cuda:", torch.version.cuda)')"
@@ -120,12 +109,10 @@ if [ "${rebuild_venv}" = "true" ]; then
   export LD_LIBRARY_PATH="$(python -c 'import torch, os; print(os.path.dirname(torch.__file__)+"/lib")'):${LD_LIBRARY_PATH:-}"
   export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
-  # wheel must be present before building mamba-ssm: its setup.py imports
-  # from wheel.bdist_wheel at parse time and is not declared as a build dep.
+  # mamba-ssm build expects wheel to be installed first.
   uv pip install wheel
 
-  # causal-conv1d is required by Mamba2 but commented out of mamba-ssm's
-  # setup.py (line 405), so it must be installed explicitly beforehand.
+  # Install causal-conv1d before mamba-ssm.
   echo "Building causal-conv1d..."
   uv pip install --no-build-isolation --no-cache-dir causal-conv1d
 
@@ -157,7 +144,6 @@ print("CUDA available:", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("CUDA device count:", torch.cuda.device_count())
     print("CUDA device 0:", torch.cuda.get_device_name(0))
-print("musdb version:", getattr(musdb, "__version__", "unknown"))
 print("lightning version:", getattr(lightning, "__version__", "unknown"))
 PY
 
@@ -168,15 +154,6 @@ if [ ! -f "${TRAIN_CONFIG}" ]; then
   echo "Missing training config: ${TRAIN_CONFIG}"
   exit 1
 fi
-
-python - <<'PY'
-import os
-from config import load_config
-cfg = load_config(os.environ["TRAIN_CONFIG"])
-if abs(float(cfg.segment_seconds) - 7.0) > 1e-9:
-    raise SystemExit(f"Expected segment_seconds=7.0, got {cfg.segment_seconds}")
-print("Config check passed: using 7-second segments.")
-PY
 
 CFG_BASENAME="$(basename "${TRAIN_CONFIG}" .yaml)"
 if [[ -n "${OUT_DIR_OVERRIDE}" ]]; then
@@ -197,7 +174,7 @@ fi
 
 python scripts/train.py "${TRAIN_ARGS[@]}"
 
-# ---- Testing after training ----
+# Testing after training.
 if [[ "${TEST_TYPE}" != "none" ]]; then
   if [[ -n "${MAX_TEST_TRACKS}" ]]; then
     TEST_TRACK_ARG=(--max-tracks "${MAX_TEST_TRACKS}")

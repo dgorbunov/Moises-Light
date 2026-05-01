@@ -152,7 +152,7 @@ def main() -> None:
     )
     early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=cfg.early_stop_patience_epochs)
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
-    # tqdm via Lightning's TQDMProgressBar: works in terminals and SLURM logs (tail -f), unlike Rich redraw.
+    # Use tqdm progress bar for terminal and SLURM logs.
     tqdm_bar = TQDMProgressBar(refresh_rate=1, leave=True)
     runtime = _resolve_runtime(cfg)
     trainer = L.Trainer(

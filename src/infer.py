@@ -46,7 +46,7 @@ def separate_track(
 def load_model_from_ckpt(ckpt_path: str | Path, device: torch.device, cfg: TrainConfig | None = None) -> MoisesLight:
     ckpt = torch.load(str(ckpt_path), map_location="cpu")
     if "hparams" in ckpt and "model" in ckpt:
-        # Exported lightweight inference checkpoint.
+        # Exported inference checkpoint.
         h = ckpt["hparams"]
         stft_h = h.get("stft") or {}
         freq_bins = int(stft_h.get("freq_bins", h.get("freq_bins", 2048))) if isinstance(stft_h, dict) else int(h.get("freq_bins", 2048))
@@ -66,7 +66,7 @@ def load_model_from_ckpt(ckpt_path: str | Path, device: torch.device, cfg: Train
         )
         model.load_state_dict(ckpt["model"])
     elif "state_dict" in ckpt:
-        # Lightning trainer checkpoint (.ckpt) available mid-training.
+        # Lightning training checkpoint (.ckpt).
         if cfg is None:
             raise RuntimeError("Loading Lightning .ckpt requires cfg for model hyperparameters.")
         model = MoisesLight(

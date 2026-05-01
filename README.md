@@ -1,107 +1,46 @@
 # Moises-Light++
 
-WPI CS 541 Final Project  
+Band-split source separation inspired by [**Moises-Light**](https://arxiv.org/abs/2510.06785). 
 
-**Authors:** Daniel Gorbunov, Daniel Zhang
-
-Baseline inspired by [**Moises-Light: Resource-efficient Band-split U-Net For Music Source Separation**](https://arxiv.org/abs/2510.06785) (arXiv:2510.06785v1), with optional **Mamba2** paths via **`configs/moises++.yaml`**.
-
----
+Model configurations:
+- Moises-Light: `configs/moises.yaml`
+- Moises-Light++:`configs/moises++.yaml`
 
 ## Install
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt && pip install -e .
 ```
 
-**Mamba training** additionally needs **`causal-conv1d`** and a CUDA build of **`mamba-ssm`** (see cluster script in **`configs/turing_train.sh`** for a reproducible install order).
+Mamba needs **`causal-conv1d`** + CUDA **`mamba-ssm`** — install order is in **`configs/turing_train.sh`**.
 
----
+## Data
 
-## Dataset (MUSDB18-HQ)
+Download MUSDB18-HQ from Zenodo website and set `musdb_root` in YAML (default `~/musdb18hq`).
 
-- Download **MUSDB18-HQ** (WAV layout) and point **`musdb_root`** in your YAML at the dataset root (default in configs: **`~/musdb18hq`**).
-- **Splits** (deterministic by track name):
-  - **Train:** all tracks under **`train/`**
-  - **Val:** first half of **`test/`** tracks
-  - **Test:** second half of **`test/`** tracks
-- **Layout:** `<MUSDB_ROOT>/train/<track>/{mixture.wav,vocals.wav,...}` (and similarly for **`test/`**).
+Layout: `train/<track>/{mixture.wav, vocals.wav, ...}` and the same under `test/`.
 
----
+Splits: train = all `train/`; val = first half of `test/`; test = second half of `test/`.
 
-## Configs
-
-| File | Role |
-|------|------|
-| **`configs/moises.yaml`** | Band-split stack, no Mamba. |
-| **`configs/moises++.yaml`** | **Mamba2** + weight sharing; same audio/STFT defaults. |
-
-Training uses **all train chunks** (`chunks_per_track` × number of train tracks per epoch). **`num_workers`** is commented for local SSD vs NFS tuning.
-
----
-
-## Train (local)
+## Train
 
 ```bash
 python scripts/train.py --config configs/moises++.yaml --target-stem vocals --out-dir runs/my_run
 ```
 
-Checkpoints and **`config.json`** go under **`runs/<out-dir>/<stem>/`**. Lightning **`TQDMProgressBar`** is forced so logs behave well under **`tail -f`**.
+Artifacts: `runs/<out-dir>/<stem>/` (checkpoints, `config.json`). Resume: `--resume .../vocals/checkpoints/last.ckpt`. Multi-GPU: set `trainer.devices` in YAML; batch size is per GPU.
 
-**Resume:**
-
-```bash
-python scripts/train.py --config configs/moises++.yaml --target-stem vocals \
-  --out-dir runs/my_existing_parent_dir \
-  --resume runs/my_existing_parent_dir/vocals/checkpoints/last.ckpt
-```
-
-**Multi-GPU:** set **`trainer.devices`** (and **`strategy: "auto"`**) in YAML; batch size is **per GPU**.
-
----
-
-## Test / inference (`scripts/test.py`)
-
-**MUSDB test split** (metrics + optional JSON):
+## Test
 
 ```bash
 python scripts/test.py --config configs/moises++.yaml --ckpt runs/my_run/vocals/best_legacy.pt
-
-python scripts/test.py --config configs/moises++.yaml --ckpt runs/my_run/vocals/best_legacy.pt \
-  --max-tracks 5 --save-json runs/my_run/vocals/test_report.json
 ```
 
-**Export WAVs** (per-track filenames under a directory; **`--save-originals`** adds mixture + reference stem):
+- **`--max-tracks N`**, **`--save-json path`** — cap / dump JSON  
+- **`--save-audio-dir dir [--save-originals]`** — export WAVs  
+- **`--mixture-wav path [--reference-wav path]`** — one-off file; estimate saved as **`{mixture_stem}-{target_stem}.wav`**. Mixture-only: audio is adapted (decode → stereo → config SR → peak-safe clamp). With reference: optional **`--no-adapt-web-audio`**, **`--normalize-peak`**.
 
-```bash
-python scripts/test.py --config configs/moises++.yaml --ckpt runs/my_run/vocals/best_legacy.pt \
-  --save-audio-dir runs/my_run/vocals/test_wavs --save-originals
-```
+## Slurm Training/Testing
 
-**Single mixture file** — estimate is written beside the input as **`{mixture_stem}-{target_stem}.wav`**.
-
-Training and **MUSDB** evaluation use the dataset tensors as in commit **51a19f6** (raw **`torch.from_numpy`**, no loader-side resampling). For **non-dataset** audio, **`--mixture-wav` without `--reference-wav`** runs **`load_audio_adapted_for_inference`** (decode, stereo, resample to **`sample_rate`**, clamp / mild peak scaling). JSON includes **`input_adaptation`**.
-
-With **`--reference-wav`**, use **`--no-adapt-web-audio`** if files are already **44.1 kHz stereo**, and optionally **`--normalize-peak`** for consistent SI-SDR levels.
-
-```bash
-python scripts/test.py --config configs/moises++.yaml --ckpt runs/my_run/vocals/best_legacy.pt \
-  --mixture-wav path/to/mix.wav --reference-wav path/to/vocals.wav --save-originals --normalize-peak
-```
-
----
-
-## Turing cluster (SLURM)
-
-See **`configs/README.md`** for **`turing_train.sh`** and **`turing_test.sh`** (`sbatch`, resume, multi-GPU, logs).
-
----
-
-## Utilities
-
-```bash
-python scripts/analyze_chunk_energy.py --config configs/moises++.yaml --samples 2000
-```
+All in `configs`!

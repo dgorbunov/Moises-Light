@@ -32,9 +32,7 @@ class MoisesLoss(nn.Module):
     def forward(self, pred_spec: torch.Tensor, tgt_spec: torch.Tensor, tgt_wav: torch.Tensor) -> torch.Tensor:
         spec_loss = torch.mean(torch.abs(pred_spec - tgt_spec))
         pred_wav = istft(pred_spec, self.stft_params, length=tgt_wav.shape[-1])
-        # Time-domain L1: spectrogram L1 has near-zero gradient when output amplitude
-        # collapses (most bins are silent so pred=0 matches tgt≈0 everywhere).
-        # Waveform L1 is dense — penalises amplitude collapse directly.
+        # Add waveform L1 to stabilize amplitude learning.
         wav_loss = torch.mean(torch.abs(pred_wav - tgt_wav.float()))
         loss = spec_loss + wav_loss
         if self.multires is None:

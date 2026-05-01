@@ -38,9 +38,7 @@ class MusdbTrainChunkDataset(Dataset):
         track = self.tracks[idx % len(self.tracks)]
         track.chunk_duration = self.segment_seconds
         max_start = max(0.0, float(track.duration) - self.segment_seconds)
-        # Retry up to 8 times to find a chunk where the target stem has enough
-        # energy relative to the mixture. Tracks with silent stems (e.g. house
-        # music with no vocals) are skipped so the model isn't trained on them.
+        # Retry to find a chunk with sufficient target-stem energy.
         for _ in range(8):
             track.chunk_start = random.uniform(0.0, max_start) if max_start > 0.0 else 0.0
             mixture = torch.from_numpy(track.audio.T).float()
@@ -128,9 +126,7 @@ class MusdbDataModule(L.LightningDataModule):
     def train_dataloader(self) -> DataLoader:
         if self._train_ds is None:
             raise RuntimeError("setup() must run before requesting dataloaders.")
-        # persistent_workers=True has caused indefinite hangs at train→val boundaries on NFS +
-        # multiprocessing (workers stuck while Lightning switches dataloaders). Keep workers,
-        # but tear down worker processes each epoch — small overhead, avoids deadlock.
+        # Disable persistent workers for more reliable loader transitions.
         return DataLoader(
             self._train_ds,
             batch_size=self.batch_size,
@@ -144,9 +140,7 @@ class MusdbDataModule(L.LightningDataModule):
     def val_dataloader(self) -> DataLoader:
         if self._val_ds is None:
             raise RuntimeError("setup() must run before requesting dataloaders.")
-        # Same batch_size as train — keeps Mamba2 intermediate shapes aligned so validation
-        # reuses the same compiled kernels instead of JIT-autotuning a separate geometry.
-        # (Hardcoded batch_size=1 made every val epoch compile/run its own narrow-batch paths.)
+        # Keep validation batch size aligned with training.
         return DataLoader(
             self._val_ds,
             batch_size=self.batch_size,
